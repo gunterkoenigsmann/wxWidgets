@@ -764,7 +764,7 @@ wxRect LifeCanvas::CellRect(wxInt32 i, wxInt32 j) const
 //
 // Drawing on a wxClientDC outside a paint handler does not reach the screen on
 // every platform -- see wxClientDC::CanBeUsedForDrawing(), which reports false
-// under GTK4, under GTK3 on Wayland, and on macOS and Qt. Repainting from
+// under wxGTK on Wayland and on the macOS and Qt ports. Repainting from
 // OnPaint(), which already draws whatever the Life object says is alive in the
 // damaged area, works everywhere.
 void LifeCanvas::RefreshCell(wxInt32 i, wxInt32 j)
