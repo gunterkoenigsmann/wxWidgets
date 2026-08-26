@@ -34,6 +34,7 @@ public:
         wxPanel* centre = new wxPanel(this);
         centre->SetBackgroundColour(*wxWHITE);
         m_mgr.AddPane(centre, wxAuiPaneInfo().CenterPane().Name("centre"));
+        WatchPointer(centre);
 
         m_left = new wxPanel(this, wxID_ANY, wxDefaultPosition,
                              wxSize(200, 300));
@@ -56,7 +57,39 @@ public:
         const wxPoint origin = ClientToScreen(wxPoint(0, 0));
         fprintf(stderr, "CLIENT %d %d %d %d\n",
                 origin.x, origin.y, cs.x, cs.y);
+
+        // The same two things in client coordinates, which is all this
+        // window reliably knows. Everything above went through
+        // ClientToScreen(), and under Wayland that adds a position the
+        // compositor never granted -- the very defect being tested -- so a
+        // driver there must map these itself. See CALIBRATE below.
+        fprintf(stderr, "AIMREL %d %d\n", r.x + r.width / 2, r.y - 9);
+        fprintf(stderr, "CLIENTREL %d %d\n", cs.x, cs.y);
         fflush(stderr);
+    }
+
+    // A driver that cannot trust ClientToScreen() can still find the mapping
+    // by moving the pointer somewhere and asking where that landed: every
+    // motion is echoed in client coordinates, and the difference between the
+    // two is the offset. Bound on the panel rather than the frame, whose
+    // client area is a child window that takes the pointer first.
+    void WatchPointer(wxWindow* on)
+    {
+        on->Bind(wxEVT_MOTION, [on, this](wxMouseEvent& e) {
+            // Report in the frame's client coordinates, which is what
+            // AIMREL is expressed in. The event arrives relative to the
+            // window it was bound on, and that window does not start at the
+            // frame's client origin -- it starts after the docked pane, so
+            // using it directly puts the whole calibration out by the width
+            // of that dock.
+            wxPoint p = e.GetPosition();
+            for ( wxWindow* w = on; w && w != this; w = w->GetParent() )
+                p += w->GetPosition();
+
+            fprintf(stderr, "MOTION %d %d\n", p.x, p.y);
+            fflush(stderr);
+            e.Skip();
+        });
     }
 
     void ReportState(const char* when)

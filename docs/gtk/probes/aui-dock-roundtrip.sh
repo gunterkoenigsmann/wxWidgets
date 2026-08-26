@@ -49,10 +49,27 @@ if [ "$1" = "x11" ]; then
   fi
   DRAG="env DISPLAY=$D $XDRAG"
 else
-  export XDG_RUNTIME_DIR=/tmp/xdgrt WAYLAND_DISPLAY=wayland-1
+  export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/xdgrt}
+  export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
   export GDK_BACKEND=wayland
   unset DISPLAY
   DRAG="$WLDRAG"
+
+  # Pick the socket that answers rather than the newest name: a compositor
+  # that died leaves its socket behind, and swaymsg against one of those
+  # fails in a way that looks like the window not existing.
+  if [ -z "$SWAYSOCK" ] || ! swaymsg -t get_version >/dev/null 2>&1; then
+    for sock in $(ls -t "$XDG_RUNTIME_DIR"/sway-ipc.*.sock 2>/dev/null); do
+      if SWAYSOCK=$sock swaymsg -t get_version >/dev/null 2>&1; then
+        export SWAYSOCK=$sock
+        break
+      fi
+    done
+  fi
+  if ! swaymsg -t get_version >/dev/null 2>&1; then
+    echo "  HARNESS no compositor answering in $XDG_RUNTIME_DIR"
+    exit 1
+  fi
 fi
 export LD_LIBRARY_PATH=$WXBUILD/lib
 LOG=/tmp/dockrun-$1.log
@@ -71,6 +88,72 @@ if [ -z "$AX" ]; then
   echo "  no geometry reported -- app did not start"
   kill $APP 2>/dev/null
   exit 1
+fi
+
+if [ "$1" = "wayland" ]; then
+  # Everything the app reported above went through ClientToScreen(), which
+  # under Wayland adds a position the compositor never granted. Aiming at it
+  # misses the caption entirely, and the run then reports "never floated it"
+  # -- a broken harness wearing the clothes of a result. So derive the
+  # mapping from the pointer instead: put it somewhere known, read back where
+  # the app says it landed, and subtract.
+  # Poll: the app prints its geometry as soon as it has any, which is before
+  # the compositor has finished mapping and floating the window. Asking once
+  # reads an empty tree and looks like the window never existing.
+  for _ in $(seq 40); do
+    read SX SY SW SH <<< "$(swaymsg -t get_tree |
+        jq -r '.. | objects | select(.name == "auidock") |
+               "\(.rect.x) \(.rect.y) \(.rect.width) \(.rect.height)"')"
+    [ -n "$SX" ] && break
+    sleep 0.25
+  done
+  if [ -z "$SX" ]; then
+    echo "  HARNESS the compositor does not know a window called auidock"
+    kill $APP 2>/dev/null; exit 1
+  fi
+  echo "  compositor puts it at $SX,$SY ${SW}x${SH}"
+
+  probe_client()   # $1,$2 absolute -> echoes the client coords reported
+  {
+    # Approach in steps rather than jumping straight there. Two absolute
+    # moves in quick succession do not reliably produce a motion event on the
+    # surface -- the pointer has to be seen crossing into it -- and a single
+    # jump to a point the pointer already occupies produces nothing at all.
+    # Either way the calibration then reads nothing and reports that the
+    # pointer never arrived, which is a harness failure dressed as a result.
+    $DRAG move $(($1 - 60)) $(($2 - 60)) sleep 150 \
+          move $(($1 - 30)) $(($2 - 30)) sleep 150 \
+          move "$1" "$2" sleep 300 >/dev/null 2>&1
+    sleep 0.3
+    grep '^MOTION ' $LOG | tail -1 | awk '{print $2,$3}'
+  }
+
+  P1X=$((SX + SW*3/4)); P1Y=$((SY + SH/2))
+  read M1X M1Y <<< "$(probe_client $P1X $P1Y)"
+  if [ -z "$M1X" ]; then
+    echo "  HARNESS the pointer never reached the window -- no motion seen"
+    kill $APP 2>/dev/null; exit 1
+  fi
+  OFFX=$((P1X - M1X)); OFFY=$((P1Y - M1Y))
+
+  # Control: predict a second point from that offset and check the app agrees.
+  # Without this the offset is an assumption, and a wrong one produces a run
+  # that looks like a measurement.
+  P2X=$((SX + SW*3/5)); P2Y=$((SY + SH*2/5))
+  read M2X M2Y <<< "$(probe_client $P2X $P2Y)"
+  EX=$((P2X - OFFX)); EY=$((P2Y - OFFY))
+  if [ -z "$M2X" ] || [ $((M2X - EX)) -gt 2 ] || [ $((EX - M2X)) -gt 2 ] ||
+     [ $((M2Y - EY)) -gt 2 ] || [ $((EY - M2Y)) -gt 2 ]; then
+    echo "  HARNESS calibration failed: predicted $EX,$EY"
+    echo "            but the app saw ${M2X:-none},${M2Y:-none}"
+    kill $APP 2>/dev/null; exit 1
+  fi
+  echo "  calibrated: client+($OFFX,$OFFY) = absolute, checked on a 2nd point"
+
+  read RAX RAY <<< "$(grep -m1 '^AIMREL ' $LOG | awk '{print $2,$3}')"
+  read RCW RCH <<< "$(grep -m1 '^CLIENTREL ' $LOG | awk '{print $2,$3}')"
+  AX=$((RAX + OFFX)); AY=$((RAY + OFFY))
+  CX=$OFFX; CY=$OFFY; CW=$RCW; CH=$RCH
 fi
 TX=$((CX + 15)); TY=$((CY + CH/2))
 echo "  caption $AX,$AY | client $CX,$CY ${CW}x${CH} | drop $TX,$TY"
