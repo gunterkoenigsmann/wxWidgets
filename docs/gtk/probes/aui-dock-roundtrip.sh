@@ -32,8 +32,21 @@ if [ "$1" = "x11" ]; then
   D=":$((110 + RANDOM % 40))"
   Xvfb $D -screen 0 1280x1024x24 -nolisten tcp >/dev/null 2>&1 &
   sleep 2
-  DISPLAY=$D openbox >/dev/null 2>&1 & sleep 2
+  DISPLAY=$D openbox >/dev/null 2>&1 &
   export DISPLAY=$D GDK_BACKEND=x11; unset WAYLAND_DISPLAY
+  # Wait for the window manager to actually own the display rather than
+  # sleeping and hoping. Without one the frame is undecorated and lands
+  # somewhere else, the caption is not where the drag aims, and the run
+  # reports "never floated it" -- a failure of the harness wearing the
+  # clothes of a result.
+  for _ in $(seq 40); do
+    xdotool get_num_desktops >/dev/null 2>&1 && break
+    sleep 0.25
+  done
+  if ! xdotool get_num_desktops >/dev/null 2>&1; then
+    echo "  no window manager on $D -- openbox did not come up"
+    exit 1
+  fi
   DRAG="env DISPLAY=$D $XDRAG"
 else
   export XDG_RUNTIME_DIR=/tmp/xdgrt WAYLAND_DISPLAY=wayland-1
@@ -45,7 +58,13 @@ export LD_LIBRARY_PATH=$WXBUILD/lib
 LOG=/tmp/dockrun-$1.log
 ( timeout 32 $AUIDOCK > $LOG 2>&1 ) &
 APP=$!
-sleep 5
+# Poll for the geometry rather than sleeping a fixed time: under gdb or a
+# loaded machine the app needs longer, and a fixed sleep then reads an empty
+# log and calls it a failed start.
+for _ in $(seq 60); do
+  grep -q '^CLIENT ' $LOG 2>/dev/null && break
+  sleep 0.25
+done
 read AX AY <<< "$(grep -m1 '^AIM ' $LOG | awk '{print $2,$3}')"
 read CX CY CW CH <<< "$(grep -m1 '^CLIENT ' $LOG | awk '{print $2,$3,$4,$5}')"
 if [ -z "$AX" ]; then
