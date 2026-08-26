@@ -42,6 +42,7 @@ gcc -o ref gtk3-reference-values.c $(pkg-config --cflags --libs gtk+-3.0) \
 | `gtk4-stylecontext-lifecycle.c` | Does the rewritten class's create/destroy cycle leak or emit GTK criticals? (Runs 500 cycles; children attached with `gtk_widget_set_parent()` are *not* freed with the parent, so this is easy to get wrong.) |
 | `x11-focus-watch.c` | Where is the X input focus, where is the pointer, and does anyone hold a grab? Asked from outside a running test, which is the only way to tell "no input arrives" apart from "input arrives somewhere else". Builds with `-lX11`, no GTK. See `../x11-input-debugging.md`. |
 | `gtk4-popover-input.c` | Is a `GtkPopover` given the pointer when the pointer was already inside its parent window before the popover appeared? (No, unless it autohides -- and a `wxPopupWindow` is a popover under GTK4. Needs `xdotool`. See issue #138.) |
+| `gtk3-dnd-file-source.c` | Does repeated X11 file DnD from a legacy GTK3 source leave GTK4's drop state valid? (It caught the re-entrant `GtkDropTargetAsync::drop` handling in issue #144.) |
 | `gtk3-reference-values.c` + `gtk4-comparison-values.c` | Differential check: does the GTK4 real-widget approach return the same values as the GTK3 synthetic-path approach for the same logical query? |
 
 ## Reading the differential check
@@ -165,3 +166,23 @@ not have to be re-derived.
 It also records the answer, which is issue #138: the click never reaches the
 popup, because a `GtkPopover` which does not autohide is not given the pointer
 once GTK has processed a motion event over the parent window.
+
+## `wayland-toplevel-move.cpp` — can a toplevel be moved at all?
+
+Run it through its driver, which supplies the controls:
+
+```
+./wayland-toplevel-move.sh /path/to/wx-build
+```
+
+The probe asks a `wxFrame` to move to three positions in turn and prints what
+`GetPosition()` says and what `wxEVT_MOVE` carries. On its own that measures
+nothing, because wx is free to believe whatever it likes; the script therefore
+runs it twice and adds an outside witness each time. Under X11 the X server is
+asked where the window is, which shows a move is detectable at all. Under
+headless sway the compositor is asked, and is then told to move that same
+window itself -- if it could not, the run says nothing about `Move()` and the
+numbers should be thrown away.
+
+The answer is in `docs/gtk/wayland-testing.md`: three moves, no movement, and
+wx reporting all three as having happened. It is the first half of issue #134.
