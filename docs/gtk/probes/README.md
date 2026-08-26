@@ -43,6 +43,7 @@ gcc -o ref gtk3-reference-values.c $(pkg-config --cflags --libs gtk+-3.0) \
 | `x11-focus-watch.c` | Where is the X input focus, where is the pointer, and does anyone hold a grab? Asked from outside a running test, which is the only way to tell "no input arrives" apart from "input arrives somewhere else". Builds with `-lX11`, no GTK. See `../x11-input-debugging.md`. |
 | `gtk4-popover-input.c` | Is a `GtkPopover` given the pointer when the pointer was already inside its parent window before the popover appeared? (No, unless it autohides -- and a `wxPopupWindow` is a popover under GTK4. Needs `xdotool`. See issue #138.) |
 | `gtk3-dnd-file-source.c` | Does repeated X11 file DnD from a legacy GTK3 source leave GTK4's drop state valid? (It caught the re-entrant `GtkDropTargetAsync::drop` handling in issue #144.) |
+| `gtk4-destroyed-surface-pointer.c` | What happens when the pointer position of a surface whose X window is already gone is asked for? (The process dies with `BadWindow`; `gdk_surface_is_destroyed()` does not know yet, so only an X error trap makes the query safe. That is issue #113.) |
 | `gtk3-reference-values.c` + `gtk4-comparison-values.c` | Differential check: does the GTK4 real-widget approach return the same values as the GTK3 synthetic-path approach for the same logical query? |
 
 ## Reading the differential check
@@ -186,3 +187,91 @@ numbers should be thrown away.
 
 The answer is in `docs/gtk/wayland-testing.md`: three moves, no movement, and
 wx reporting all three as having happened. It is the first half of issue #134.
+
+## `crash-capture.sh` — what to collect when a sample crashes elsewhere
+
+Some crashes only happen on a real desktop: a running session bus, a desktop
+portal answering, a GTK newer than CI's. This collects enough to act on one
+without an interactive debugger, which on a crashing GTK app is worse than
+useless -- the app dies holding an X server grab, gdb stops at the signal and
+never releases it, and the whole desktop stops accepting input, gdb's own
+window included. It looks exactly like gdb hanging. `gdb -batch` runs to the
+crash, prints, and exits, so the grab never outlives the process.
+
+It also runs the app once with `GTK_THEME` set. That is not cosmetic:
+`wxSystemSettingsModule::OnInit()` only talks to the desktop portal when
+`GTK_THEME` is unset, so setting it skips the colour-scheme code that
+otherwise runs at startup in every GUI app. Crash in one and not the other
+narrows it to that path in a single run. On the first crash it was used
+for, it crashed both ways, which ruled that path out -- a discriminator
+earns its place by excluding as readily as by confirming.
+
+Where a crash dumps core, `coredumpctl info` prints a stack trace on its
+own and the script prefers it: nothing has to be run again, and no debugger
+has to resolve symbols before you can read anything.
+
+Before any of that it runs `gtk4-widget-factory`, which contains no wx at
+all. That is the control, and it is first because it can end the
+investigation outright. The crash it was written for looked like ours --
+several samples dying at startup on X11, on a machine the port had never
+run on -- and the backtrace turned out to be a recursion between GTK and
+the ibus input method module, with not one wx frame in the cycle.
+`gtk4-widget-factory` segfaulted identically on that machine, which is what
+settled it.
+
+The bottom of that stack is worth keeping, because it shows how little the
+application had to do to trigger it:
+
+```
+main -> wxEntry -> MyApp::OnInit -> MyFrame::MyFrame
+     -> wxTextCtrl::Create
+     -> gtk_text_view_new_with_buffer()
+     -> g_object_new -> [ nine frame GTK/ibus cycle, ~7900 times ]
+```
+
+Constructing a `GtkTextView` was enough. The reported cause of this shape is
+an ibus GTK4 module built against a different GTK4 than the one installed --
+it announces itself with "class size for type 'IBusIMContext' is smaller than
+the parent type's 'GtkIMContext' class size" before dying -- so reinstalling
+the module against the current GTK fixes it. Setting `GTK_IM_MODULE` to
+`gtk-im-context-simple` sidesteps it meanwhile -- confirmed on the affected
+machine, where it stopped the crash outright.
+
+Three readings agree, which is what makes this reportable rather than a
+guess: the cycle contains no wx frame, a GTK application containing no wx
+crashes identically, and replacing the input method module fixes it without
+changing a line of wx.
+
+The general lesson is worth more than the instance: a crash reported
+against a port is not evidence about the port until something without the
+port in it has been shown to survive. Any X11 crash from a machine whose
+GTK is broken this way says nothing about wx, however many wx samples
+reproduce it.
+
+Two later additions came from the crash it was written for, which turned
+out to be a runaway recursion between GTK and the ibus input method module
+with no wx frame anywhere in the cycle. An input method module loads into
+every GTK application on the machine, runs before any of wx's code does,
+and no CI covers it, so the script runs the application once with
+`GTK_IM_MODULE=gtk-im-context-simple`. And it runs a stock GTK4
+application, because without that control the whole exercise establishes
+only that something crashed on a machine wx happened to be running on --
+if `gtk4-widget-factory` dies the same way, the fault is in the
+installation and a day spent reading wx is a day wasted.
+
+## Checking whether a build contains a given fix
+
+`nm | grep` for a function name only works if the function survives to have a
+name. A `static` helper does not: at `-O2` it is inlined into its callers and
+no symbol is emitted, so `nm` finds nothing whether the fix is present or not.
+Measured on `wxAuiGetDragClientPosition()` -- symbol present at `-O0`, absent
+at `-O2`, same source both times.
+
+Check the source and the build's freshness instead, which does not care how
+the compiler chose to emit anything:
+
+```sh
+git log --oneline -1
+grep -c wxAuiGetDragClientPosition ../src/aui/framemanager.cpp
+find . -name '*framemanager.o' -newer ../src/aui/framemanager.cpp
+```
