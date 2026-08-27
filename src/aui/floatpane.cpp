@@ -98,11 +98,30 @@ wxAuiFloatingFrame::wxAuiFloatingFrame(wxWindow* parent,
 
 extern "C" {
 
+// Set when this frame has seen a button press of its own. Undocking creates
+// the frame while the button is already down, and without this GTK starts a
+// drag from that in-flight press: the pane is then being dragged by wxAUI's
+// mouse capture and by a drag session at the same time, and releasing outside
+// any window leaves the drag icon stranded on screen with nothing to end it.
+static void
+wxgtk_aui_caption_pressed(GtkGestureClick* WXUNUSED(gesture),
+                          int WXUNUSED(n_press), double WXUNUSED(x),
+                          double WXUNUSED(y), gpointer data)
+{
+    g_object_set_data(G_OBJECT(data), "wx-caption-press-seen",
+                      GINT_TO_POINTER(1));
+}
+
 static GdkContentProvider*
 wxgtk_aui_caption_drag_prepare(GtkDragSource* WXUNUSED(source),
                                double WXUNUSED(x), double y, gpointer data)
 {
     wxAuiFloatingFrame* const self = static_cast<wxAuiFloatingFrame*>(data);
+
+    GtkWidget* const widget = self->GetHandle();
+    if ( !widget || !g_object_get_data(G_OBJECT(widget),
+                                       "wx-caption-press-seen") )
+        return nullptr;
 
     if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
     {
@@ -159,10 +178,26 @@ void wxAuiFloatingFrame::GTKAddCaptionDragSource()
     g_object_set_data(G_OBJECT(widget), "wx-caption-drag-taken",
                       GINT_TO_POINTER(1));
 
+    GtkGesture* const press = gtk_gesture_click_new();
+    g_signal_connect(press, "pressed",
+                     G_CALLBACK(wxgtk_aui_caption_pressed), widget);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(press),
+                                               GTK_PHASE_CAPTURE);
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(press));
+    wxUnusedVar(press);
+
     GtkDragSource* const source = gtk_drag_source_new();
     gtk_drag_source_set_actions(source, GDK_ACTION_MOVE);
     g_signal_connect(source, "prepare",
                      G_CALLBACK(wxgtk_aui_caption_drag_prepare), this);
+
+    // Drag the pane's own likeness rather than GTK's default icon for a
+    // string, which is a label showing the payload -- that is where the
+    // "wxaui-pane:tree" window came from.
+    GdkPaintable* const icon = gtk_widget_paintable_new(widget);
+    gtk_drag_source_set_icon(source, icon, 0, 0);
+    g_object_unref(icon);
+
     gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(source));
 }
 
