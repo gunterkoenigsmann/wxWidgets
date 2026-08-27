@@ -21,6 +21,11 @@
 #if wxUSE_AUI
 
 #include "wx/aui/framemanager.h"
+
+#ifdef __WXGTK3__
+    #include "wx/gtk/private/wrapgtk.h"
+    #include "wx/gtk/private/backend.h"
+#endif
 #include "wx/aui/dockart.h"
 #include "wx/aui/floatpane.h"
 #include "wx/aui/tabmdi.h"
@@ -804,6 +809,123 @@ wxAuiManager* wxAuiManager::GetManager(wxWindow* window)
 // SetManagedWindow() is usually called once when the frame
 // manager class is being initialized.  "frame" specifies
 // the frame which should be managed by the frame manager
+
+// Diagnostic logging for the Wayland docking failure, enabled by setting
+// WXAUI_DRAGLOG. It stays because the failure has only ever been seen on a
+// machine none of the development happens on, so the alternative to reading
+// what that machine computes is guessing at it, which has a poor record.
+//
+// Remove this along with the rest of the fork-only changes; see #112.
+static bool wxAuiDragLogging()
+{
+    static const bool s_on = wxGetEnv("WXAUI_DRAGLOG", nullptr);
+    return s_on;
+}
+
+static void wxAuiDragLog(const char* what, const wxPoint& screen,
+                         const wxPoint& client, const char* extra = "")
+{
+    if ( !wxAuiDragLogging() )
+        return;
+
+    fprintf(stderr, "AUIDRAG %-18s screen=(%d,%d) client=(%d,%d) %s\n",
+            what, screen.x, screen.y, client.x, client.y, extra);
+    fflush(stderr);
+}
+
+// Can a floating frame be made to follow the pointer while it is dragged?
+//
+// Under Wayland it cannot: a client may not position its own toplevel, and
+// the compositor performs the drag without reporting it. That is what makes
+// the ordinary re-docking path unreachable there; see #167.
+static bool wxAuiCanDragFloatingFrame(wxWindow* frame)
+{
+#ifdef __WXGTK3__
+    if ( GtkWidget* const widget = frame->GetHandle() )
+        return !wxGTKImpl::IsWayland(gtk_widget_get_display(widget));
+#endif // __WXGTK3__
+
+    wxUnusedVar(frame);
+    return true;
+}
+
+
+#ifdef __WXGTK4__
+
+// Re-docking a floating pane under Wayland cannot go through the window's
+// movement, because the compositor performs that move and reports nothing --
+// see #167. Drag and drop is the one thing the protocol does report across
+// surfaces, and it reports it in the coordinates of the surface being dropped
+// on, which is exactly what the dock decision needs.
+//
+// The drop target is added as a GTK event controller rather than through
+// wxWindow::SetDropTarget(), which deletes whatever drop target the
+// application had. A widget may carry several controllers, so this one costs
+// the application nothing.
+
+// The payload is the pane's name rather than a pointer to it: a name survives
+// being turned into text and back, and cannot be dangling by the time it is
+// read.
+#define wxAUI_PANE_DND_PREFIX "wxaui-pane:"
+
+extern "C" {
+
+static gboolean
+wxgtk_aui_pane_drop(GtkDropTarget* WXUNUSED(target), const GValue* value,
+                    double x, double y, gpointer data)
+{
+    if ( !G_VALUE_HOLDS_STRING(value) )
+        return FALSE;
+
+    const char* const payload = g_value_get_string(value);
+    if ( !payload || !g_str_has_prefix(payload, wxAUI_PANE_DND_PREFIX) )
+        return FALSE;
+
+    wxAuiManager* const mgr = static_cast<wxAuiManager*>(data);
+
+    return mgr->GTKDropPaneNamed(
+                wxString::FromUTF8(payload + strlen(wxAUI_PANE_DND_PREFIX)),
+                wxPoint(wxRound(x), wxRound(y)));
+}
+
+} // extern "C"
+
+void wxAuiManager::GTKAddPaneDropTarget()
+{
+    GtkWidget* const widget = m_frame ? m_frame->GetHandle() : nullptr;
+    if ( !widget )
+        return;
+
+    GtkDropTarget* const target =
+        gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_MOVE);
+    g_signal_connect(target, "drop", G_CALLBACK(wxgtk_aui_pane_drop), this);
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(target));
+}
+
+bool wxAuiManager::GTKDropPaneNamed(const wxString& name,
+                                    const wxPoint& clientPt)
+{
+    wxAuiPaneInfo& pane = GetPane(name);
+    if ( !pane.IsOk() || !pane.frame )
+        return false;
+
+    if ( wxAuiDragLogging() )
+    {
+        fprintf(stderr, "AUIDRAG dnd-drop        pane=%s at=(%d,%d)\n",
+                static_cast<const char*>(name.utf8_str()),
+                clientPt.x, clientPt.y);
+        fflush(stderr);
+    }
+
+    // Where in the pane it was picked up is not recoverable from the drop, so
+    // use the offset recorded when the drag started.
+    DropFloatingPaneAt(pane.window, clientPt, m_actionOffset);
+
+    return true;
+}
+
+#endif // __WXGTK4__
+
 void wxAuiManager::SetManagedWindow(wxWindow* wnd)
 {
     wxASSERT_MSG(wnd, wxT("specified window must be non-null"));
@@ -825,6 +947,10 @@ void wxAuiManager::SetManagedWindow(wxWindow* wnd)
     m_frame->Bind(wxEVT_MOUSE_CAPTURE_LOST, &wxAuiManager::OnCaptureLost, this);
     m_frame->Bind(wxEVT_CHILD_FOCUS, &wxAuiManager::OnChildFocus, this);
     m_frame->Bind(wxEVT_AUI_FIND_MANAGER, &wxAuiManager::OnFindManager, this);
+#ifdef __WXGTK4__
+    if ( !wxAuiCanDragFloatingFrame(m_frame) )
+        GTKAddPaneDropTarget();
+#endif
     m_frame->Bind(wxEVT_SYS_COLOUR_CHANGED, &wxAuiManager::OnSysColourChanged, this);
 #ifndef wxHAS_DPI_INDEPENDENT_PIXELS
     m_frame->Bind(wxEVT_DPI_CHANGED, &wxAuiManager::OnDPIChanged, this);
@@ -4214,29 +4340,6 @@ void wxAuiManager::OnFloatingPaneMoveStart(wxWindow* wnd)
 
     if (m_flags & wxAUI_MGR_TRANSPARENT_DRAG)
         pane.frame->SetTransparent(150);
-}
-
-// Diagnostic logging for the Wayland docking failure, enabled by setting
-// WXAUI_DRAGLOG. It stays because the failure has only ever been seen on a
-// machine none of the development happens on, so the alternative to reading
-// what that machine computes is guessing at it, which has a poor record.
-//
-// Remove this along with the rest of the fork-only changes; see #112.
-static bool wxAuiDragLogging()
-{
-    static const bool s_on = wxGetEnv("WXAUI_DRAGLOG", nullptr);
-    return s_on;
-}
-
-static void wxAuiDragLog(const char* what, const wxPoint& screen,
-                         const wxPoint& client, const char* extra = "")
-{
-    if ( !wxAuiDragLogging() )
-        return;
-
-    fprintf(stderr, "AUIDRAG %-18s screen=(%d,%d) client=(%d,%d) %s\n",
-            what, screen.x, screen.y, client.x, client.y, extra);
-    fflush(stderr);
 }
 
 void wxAuiManager::OnFloatingPaneMoving(wxWindow* wnd, wxDirection dir)

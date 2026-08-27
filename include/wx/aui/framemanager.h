@@ -611,6 +611,16 @@ protected:
     // platform will supply: see #167.
     void DropFloatingPaneAt(wxWindow* window, const wxPoint& clientPt,
                             const wxPoint& actionOffset);
+
+#ifdef __WXGTK4__
+public:
+    // Where a floating frame cannot be dragged, a pane comes back through a
+    // drag and drop session instead; see #167. Public because the GTK drop
+    // handler is a C callback and reaches it from outside the class.
+    void GTKAddPaneDropTarget();
+    bool GTKDropPaneNamed(const wxString& name, const wxPoint& clientPt);
+protected:
+#endif // __WXGTK4__
     void OnFloatingPaneActivated(wxWindow* window);
     void OnFloatingPaneClosed(wxWindow* window, wxCloseEvent& evt);
     void OnFloatingPaneResized(wxWindow* window, const wxRect& rect);
