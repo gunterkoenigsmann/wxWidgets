@@ -21,6 +21,11 @@
 #if wxUSE_AUI
 
 #include "wx/aui/framemanager.h"
+
+#ifdef __WXGTK3__
+    #include "wx/gtk/private/wrapgtk.h"
+    #include "wx/gtk/private/backend.h"
+#endif
 #include "wx/aui/dockart.h"
 #include "wx/aui/floatpane.h"
 #include "wx/aui/tabmdi.h"
@@ -4216,6 +4221,48 @@ void wxAuiManager::OnFloatingPaneMoveStart(wxWindow* wnd)
         pane.frame->SetTransparent(150);
 }
 
+// Diagnostic logging for the Wayland docking failure, enabled by setting
+// WXAUI_DRAGLOG. It stays because the failure has only ever been seen on a
+// machine none of the development happens on, so the alternative to reading
+// what that machine computes is guessing at it, which has a poor record.
+//
+// Remove this along with the rest of the fork-only changes; see #112.
+static bool wxAuiDragLogging()
+{
+    static const bool s_on = wxGetEnv("WXAUI_DRAGLOG", nullptr);
+    return s_on;
+}
+
+static void wxAuiDragLog(const char* what, const wxPoint& screen,
+                         const wxPoint& client, const char* extra = "")
+{
+    if ( !wxAuiDragLogging() )
+        return;
+
+    fprintf(stderr, "AUIDRAG %-18s screen=(%d,%d) client=(%d,%d) %s\n",
+            what, screen.x, screen.y, client.x, client.y, extra);
+    fflush(stderr);
+}
+
+// Can a floating frame be made to follow the pointer while it is dragged?
+//
+// Under Wayland it cannot: a client may not position its own toplevel, so a
+// pane floated mid-drag stays where the compositor first put it. The drag
+// then depends on wxGetMousePosition(), which answers relative to whichever
+// surface the pointer is over, and ScreenToClient(), which subtracts a
+// position the frame was never granted. Those two cancel while the pointer
+// is over the managed frame and stop cancelling the moment it is not.
+static bool wxAuiCanDragFloatingFrame(wxWindow* frame)
+{
+#ifdef __WXGTK3__
+    if ( GtkWidget* const widget = frame->GetHandle() )
+        return !wxGTKImpl::IsWayland(gtk_widget_get_display(widget));
+#endif // __WXGTK3__
+
+    wxUnusedVar(frame);
+    return true;
+}
+
 void wxAuiManager::OnFloatingPaneMoving(wxWindow* wnd, wxDirection dir)
 {
     // try to find the pane
@@ -4264,6 +4311,7 @@ void wxAuiManager::OnFloatingPaneMoving(wxWindow* wnd, wxDirection dir)
 #endif
 
     wxPoint client_pt = m_frame->ScreenToClient(pt);
+    wxAuiDragLog("moving", pt, client_pt);
 
     // calculate the offset from the upper left-hand corner
     // of the frame to the mouse pointer
@@ -4367,6 +4415,7 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
 #endif
 
     wxPoint client_pt = m_frame->ScreenToClient(pt);
+    wxAuiDragLog("dropped", pt, client_pt);
 
     // calculate the offset from the upper left-hand corner
     // of the frame to the mouse pointer
@@ -4379,6 +4428,15 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
     {
         // do the drop calculation
         DoDrop(m_docks, m_panes, pane, client_pt, action_offset);
+
+        if ( wxAuiDragLogging() )
+        {
+            fprintf(stderr, "AUIDRAG drop-result     floating=%d docked=%d "
+                            "direction=%d frame_pos=(%d,%d)\n",
+                    pane.IsFloating() ? 1 : 0, pane.IsDocked() ? 1 : 0,
+                    pane.dock_direction, frame_pos.x, frame_pos.y);
+            fflush(stderr);
+        }
     }
 
     // if the pane is still floating, update its floating
@@ -5218,7 +5276,17 @@ void wxAuiManager::OnMotion(wxMouseEvent& event)
         {
             wxAuiPaneInfo* paneInfo = m_actionPart->pane;
 
-            if (!paneInfo->IsToolbar())
+            if (!paneInfo->IsToolbar() && !wxAuiCanDragFloatingFrame(m_frame))
+            {
+                // Drag the pane between docks the way a toolbar pane is
+                // dragged, without floating it first. That keeps the pointer
+                // over the managed frame for the whole drag, so every
+                // position comes from a motion event that says where it is
+                // rather than from a screen coordinate nobody can resolve.
+                m_action = actionDragToolbarPane;
+                m_actionWindow = paneInfo->window;
+            }
+            else if (!paneInfo->IsToolbar())
             {
                 if ((m_flags & wxAUI_MGR_ALLOW_FLOATING) &&
                     paneInfo->IsFloatable())
@@ -5340,7 +5408,11 @@ void wxAuiManager::OnMotion(wxMouseEvent& event)
         // if the pane has been floated, change the mouse
         // action actionDragFloatingPane so that subsequent
         // EVT_MOTION() events will move the floating pane
-        if (pane.IsFloating())
+        //
+        // Where a floating frame cannot follow the pointer, stay in this
+        // action instead: handing over means every later position is read
+        // from the screen, and the frame that would be moved cannot move.
+        if (pane.IsFloating() && wxAuiCanDragFloatingFrame(m_frame))
         {
             pane.state &= ~wxAuiPaneInfo::actionPane;
             m_action = actionDragFloatingPane;
