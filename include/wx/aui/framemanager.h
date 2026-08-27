@@ -624,6 +624,8 @@ public:
     // reaches it from outside the class.
     void GTKAddPaneDropTarget();
     bool GTKDropPaneNamed(const wxString& name, const wxPoint& clientPt);
+    void GTKDragPaneOver(const wxString& name, const wxPoint& clientPt);
+    void GTKDragPaneLeft();
 #endif // __WXGTK4__
 protected:
     void OnFloatingPaneActivated(wxWindow* window);

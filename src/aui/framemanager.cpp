@@ -893,7 +893,54 @@ wxgtk_aui_pane_drop(GtkDropTarget* WXUNUSED(target), const GValue* value,
                                  wxPoint(wxRound(x), wxRound(y)));
 }
 
+static GdkDragAction
+wxgtk_aui_pane_motion(GtkDropTarget* target, double x, double y, gpointer data)
+{
+    const GValue* const value = gtk_drop_target_get_value(target);
+    if ( !value || !G_VALUE_HOLDS(value, wx_aui_pane_drag_data_get_type()) )
+        return GdkDragAction(0);
+
+    const wxAuiPaneDragData* const payload =
+        static_cast<const wxAuiPaneDragData*>(g_value_get_boxed(value));
+    if ( !payload || !payload->name )
+        return GdkDragAction(0);
+
+    wxAuiManager* const mgr = static_cast<wxAuiManager*>(data);
+    mgr->GTKDragPaneOver(wxString::FromUTF8(payload->name),
+                         wxPoint(wxRound(x), wxRound(y)));
+
+    return GDK_ACTION_MOVE;
+}
+
+static void
+wxgtk_aui_pane_leave(GtkDropTarget* WXUNUSED(target), gpointer data)
+{
+    static_cast<wxAuiManager*>(data)->GTKDragPaneLeft();
+}
+
 } // extern "C"
+
+// Show where the pane would land, the same hint an ordinary drag draws.
+void wxAuiManager::GTKDragPaneOver(const wxString& name,
+                                   const wxPoint& clientPt)
+{
+    wxAuiPaneInfo& pane = GetPane(name);
+    if ( !pane.IsOk() || !pane.window )
+        return;
+
+    if ( !CanDockPanel(pane) )
+    {
+        HideHint();
+        return;
+    }
+
+    DrawHintRect(pane.window, clientPt, m_actionOffset);
+}
+
+void wxAuiManager::GTKDragPaneLeft()
+{
+    HideHint();
+}
 
 void wxAuiManager::GTKAddPaneDropTarget()
 {
@@ -904,7 +951,15 @@ void wxAuiManager::GTKAddPaneDropTarget()
     GtkDropTarget* const target =
         gtk_drop_target_new(wx_aui_pane_drag_data_get_type(),
                             GDK_ACTION_MOVE);
+    // The payload has to be readable while the pointer is still moving, so
+    // that the hint can be drawn before the drop rather than after it.
+    gtk_drop_target_set_preload(target, TRUE);
+
     g_signal_connect(target, "drop", G_CALLBACK(wxgtk_aui_pane_drop), this);
+    g_signal_connect(target, "motion",
+                     G_CALLBACK(wxgtk_aui_pane_motion), this);
+    g_signal_connect(target, "leave",
+                     G_CALLBACK(wxgtk_aui_pane_leave), this);
     gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(target));
 }
 
