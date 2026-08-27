@@ -98,6 +98,48 @@ wxAuiFloatingFrame::wxAuiFloatingFrame(wxWindow* parent,
 
 extern "C" {
 
+// The payload has a type of its own rather than being a string.
+//
+// A string is offered to the whole desktop: any application that takes text
+// accepts it, and dropping a pane on a browser sent it navigating to
+// "wxaui-pane:tree" as though it were an address. It is also what GTK builds
+// its default drag icon from, which is where the window containing that text
+// came from. A private type is understood by this manager's drop target and
+// by nothing else, so a pane dropped anywhere else is simply refused.
+struct wxAuiPaneDragData
+{
+    char* name;
+};
+
+static gpointer wx_aui_pane_drag_data_copy(gpointer boxed)
+{
+    wxAuiPaneDragData* const from = static_cast<wxAuiPaneDragData*>(boxed);
+    wxAuiPaneDragData* const to = g_new0(wxAuiPaneDragData, 1);
+    to->name = g_strdup(from->name);
+    return to;
+}
+
+static void wx_aui_pane_drag_data_free(gpointer boxed)
+{
+    wxAuiPaneDragData* const data = static_cast<wxAuiPaneDragData*>(boxed);
+    g_free(data->name);
+    g_free(data);
+}
+
+GType wx_aui_pane_drag_data_get_type(void)
+{
+    static gsize type = 0;
+    if ( g_once_init_enter(&type) )
+    {
+        const GType t = g_boxed_type_register_static(
+                            "wxAuiPaneDragData",
+                            wx_aui_pane_drag_data_copy,
+                            wx_aui_pane_drag_data_free);
+        g_once_init_leave(&type, t);
+    }
+    return static_cast<GType>(type);
+}
+
 // Set when this frame has seen a button press of its own. Undocking creates
 // the frame while the button is already down, and without this GTK starts a
 // drag from that in-flight press: the pane is then being dragged by wxAUI's
@@ -138,11 +180,14 @@ wxgtk_aui_caption_drag_prepare(GtkDragSource* WXUNUSED(source),
     if ( name.empty() )
         return nullptr;
 
-    const wxString payload = "wxaui-pane:" + name;
+    const wxScopedCharBuffer utf8 = name.utf8_str();
+
+    wxAuiPaneDragData payload;
+    payload.name = const_cast<char*>(utf8.data());
 
     GValue value = G_VALUE_INIT;
-    g_value_init(&value, G_TYPE_STRING);
-    g_value_set_string(&value, payload.utf8_str());
+    g_value_init(&value, wx_aui_pane_drag_data_get_type());
+    g_value_set_boxed(&value, &payload);
 
     GdkContentProvider* const provider =
         gdk_content_provider_new_for_value(&value);

@@ -863,10 +863,15 @@ bool wxAuiManager::CanDragFloatingFrame(wxWindow* frame)
 // application had. A widget may carry several controllers, so this one costs
 // the application nothing.
 
-// The payload is the pane's name rather than a pointer to it: a name survives
-// being turned into text and back, and cannot be dangling by the time it is
-// read.
-#define wxAUI_PANE_DND_PREFIX "wxaui-pane:"
+// The payload carries the pane's name and has a type private to wxAUI, so
+// that no other application is offered it and a pane dropped somewhere else
+// is simply refused. Defined in floatpane.cpp, which produces it.
+extern "C" GType wx_aui_pane_drag_data_get_type(void);
+
+struct wxAuiPaneDragData
+{
+    char* name;
+};
 
 extern "C" {
 
@@ -874,18 +879,18 @@ static gboolean
 wxgtk_aui_pane_drop(GtkDropTarget* WXUNUSED(target), const GValue* value,
                     double x, double y, gpointer data)
 {
-    if ( !G_VALUE_HOLDS_STRING(value) )
+    if ( !G_VALUE_HOLDS(value, wx_aui_pane_drag_data_get_type()) )
         return FALSE;
 
-    const char* const payload = g_value_get_string(value);
-    if ( !payload || !g_str_has_prefix(payload, wxAUI_PANE_DND_PREFIX) )
+    const wxAuiPaneDragData* const payload =
+        static_cast<const wxAuiPaneDragData*>(g_value_get_boxed(value));
+    if ( !payload || !payload->name )
         return FALSE;
 
     wxAuiManager* const mgr = static_cast<wxAuiManager*>(data);
 
-    return mgr->GTKDropPaneNamed(
-                wxString::FromUTF8(payload + strlen(wxAUI_PANE_DND_PREFIX)),
-                wxPoint(wxRound(x), wxRound(y)));
+    return mgr->GTKDropPaneNamed(wxString::FromUTF8(payload->name),
+                                 wxPoint(wxRound(x), wxRound(y)));
 }
 
 } // extern "C"
@@ -897,7 +902,8 @@ void wxAuiManager::GTKAddPaneDropTarget()
         return;
 
     GtkDropTarget* const target =
-        gtk_drop_target_new(G_TYPE_STRING, GDK_ACTION_MOVE);
+        gtk_drop_target_new(wx_aui_pane_drag_data_get_type(),
+                            GDK_ACTION_MOVE);
     g_signal_connect(target, "drop", G_CALLBACK(wxgtk_aui_pane_drop), this);
     gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(target));
 }
