@@ -193,6 +193,21 @@ wxgtk_aui_caption_drag_prepare(GtkDragSource* WXUNUSED(source),
         gdk_content_provider_new_for_value(&value);
     g_value_unset(&value);
 
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        // What the rest of the desktop is being offered. Anything text-like
+        // here is something another application can accept: a text drop on
+        // the Plasma desktop becomes a sticky note, which is what the stray
+        // windows turned out to be.
+        GdkContentFormats* const formats =
+            gdk_content_provider_ref_formats(provider);
+        char* const desc = gdk_content_formats_to_string(formats);
+        fprintf(stderr, "AUIFLOAT drag offers: %s\n", desc);
+        fflush(stderr);
+        g_free(desc);
+        gdk_content_formats_unref(formats);
+    }
+
     return provider;
 }
 
