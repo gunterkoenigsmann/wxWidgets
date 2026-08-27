@@ -604,6 +604,13 @@ protected:
     void OnFloatingPaneMoveStart(wxWindow* window);
     void OnFloatingPaneMoving(wxWindow* window, wxDirection dir );
     void OnFloatingPaneMoved(wxWindow* window, wxDirection dir);
+
+    // The dock decision on its own, given the pointer in the managed frame's
+    // client coordinates and where within the pane it was picked up. The two
+    // above can only work those out from screen positions, which not every
+    // platform will supply: see #167.
+    void DropFloatingPaneAt(wxWindow* window, const wxPoint& clientPt,
+                            const wxPoint& actionOffset);
     void OnFloatingPaneActivated(wxWindow* window);
     void OnFloatingPaneClosed(wxWindow* window, wxCloseEvent& evt);
     void OnFloatingPaneResized(wxWindow* window, const wxRect& rect);

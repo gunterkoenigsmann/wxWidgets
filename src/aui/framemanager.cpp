@@ -4398,6 +4398,26 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
     wxPoint frame_pos = pane.frame->GetPosition();
     wxPoint action_offset(pt.x-frame_pos.x, pt.y-frame_pos.y);
 
+    DropFloatingPaneAt(wnd, client_pt, action_offset);
+}
+
+// The dock decision, given where the pointer is in the managed frame's client
+// coordinates and where within the pane it was picked up.
+//
+// Separated from the caller above because that one can only derive those two
+// from the screen position of the pointer and of the floating frame, and
+// there are places where neither of those can be known -- Wayland tells a
+// client neither. See #167.
+void wxAuiManager::DropFloatingPaneAt(wxWindow* wnd,
+                                      const wxPoint& client_pt,
+                                      const wxPoint& action_offset)
+{
+    wxAuiPaneInfo& pane = GetPane(wnd);
+    if ( !pane.IsOk() || !pane.frame )
+        return;
+
+    const wxPoint frame_pos = pane.frame->GetPosition();
+
     // if a key modifier is pressed while dragging the frame,
     // don't dock the window
     if (CanDockPanel(pane))
