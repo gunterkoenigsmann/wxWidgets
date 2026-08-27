@@ -111,7 +111,21 @@ if [ "$1" = "wayland" ]; then
     echo "  HARNESS the compositor does not know a window called auidock"
     kill $APP 2>/dev/null; exit 1
   fi
+  read RCW RCH <<< "$(grep -m1 '^CLIENTREL ' $LOG | awk '{print $2,$3}')"
   echo "  compositor puts it at $SX,$SY ${SW}x${SH}"
+
+  # Refuse to run if the compositor did not honour the floating rule and
+  # tiled the window instead. The application reports its client size once,
+  # at startup, before any such resize; every coordinate below is derived
+  # from that size, so a window the compositor has since made a different
+  # size sends the drop somewhere nobody aimed at. It then lands outside
+  # every dock, the pane stays floating, and the run reports a docking
+  # failure that is entirely this script's doing.
+  if [ "$SW" -gt $((RCW + 40)) ] || [ "$SH" -gt $((RCH + 60)) ]; then
+    echo "  HARNESS the compositor resized the window to ${SW}x${SH}, but the"
+    echo "          application still reports ${RCW}x${RCH} -- not measurable"
+    kill $APP 2>/dev/null; exit 1
+  fi
 
   probe_client()   # $1,$2 absolute -> echoes the client coords reported
   {
@@ -151,7 +165,6 @@ if [ "$1" = "wayland" ]; then
   echo "  calibrated: client+($OFFX,$OFFY) = absolute, checked on a 2nd point"
 
   read RAX RAY <<< "$(grep -m1 '^AIMREL ' $LOG | awk '{print $2,$3}')"
-  read RCW RCH <<< "$(grep -m1 '^CLIENTREL ' $LOG | awk '{print $2,$3}')"
   AX=$((RAX + OFFX)); AY=$((RAY + OFFY))
   CX=$OFFX; CY=$OFFY; CW=$RCW; CH=$RCH
 fi

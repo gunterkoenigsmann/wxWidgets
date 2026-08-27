@@ -4409,11 +4409,14 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
         {
             fprintf(stderr, "AUIDRAG drop-result     floating=%d docked=%d "
                             "direction=%d frame_pos=(%d,%d) "
-                            "action_offset=(%d,%d) m_actionOffset=(%d,%d)\n",
+                            "action_offset=(%d,%d) cli_size=%dx%d "
+                            "pane_rect=%d,%d %dx%d\n",
                     pane.IsFloating() ? 1 : 0, pane.IsDocked() ? 1 : 0,
                     pane.dock_direction, frame_pos.x, frame_pos.y,
                     action_offset.x, action_offset.y,
-                    m_actionOffset.x, m_actionOffset.y);
+                    m_frame->GetClientSize().x, m_frame->GetClientSize().y,
+                    pane.rect.x, pane.rect.y,
+                    pane.rect.width, pane.rect.height);
             fflush(stderr);
         }
     }
