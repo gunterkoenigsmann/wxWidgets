@@ -838,7 +838,7 @@ static void wxAuiDragLog(const char* what, const wxPoint& screen,
 // Under Wayland it cannot: a client may not position its own toplevel, and
 // the compositor performs the drag without reporting it. That is what makes
 // the ordinary re-docking path unreachable there; see #167.
-static bool wxAuiCanDragFloatingFrame(wxWindow* frame)
+bool wxAuiManager::CanDragFloatingFrame(wxWindow* frame)
 {
 #ifdef __WXGTK3__
     if ( GtkWidget* const widget = frame->GetHandle() )
@@ -948,7 +948,7 @@ void wxAuiManager::SetManagedWindow(wxWindow* wnd)
     m_frame->Bind(wxEVT_CHILD_FOCUS, &wxAuiManager::OnChildFocus, this);
     m_frame->Bind(wxEVT_AUI_FIND_MANAGER, &wxAuiManager::OnFindManager, this);
 #ifdef __WXGTK4__
-    if ( !wxAuiCanDragFloatingFrame(m_frame) )
+    if ( !wxAuiManager::CanDragFloatingFrame(m_frame) )
         GTKAddPaneDropTarget();
 #endif
     m_frame->Bind(wxEVT_SYS_COLOUR_CHANGED, &wxAuiManager::OnSysColourChanged, this);

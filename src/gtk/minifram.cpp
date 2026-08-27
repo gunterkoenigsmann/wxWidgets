@@ -222,6 +222,13 @@ gtk_window_button_press_callback(GtkGestureClick* gesture,
 
     gtk_window_present(GTK_WINDOW(win->m_widget));
 
+    // Something may have taken the caption drag over -- wxAuiFloatingFrame
+    // does under Wayland, where the compositor move below cannot be followed
+    // and so leaves a pane that can never be docked again; see #167. Leave
+    // the sequence unclaimed so that whatever set this can act on it.
+    if ( g_object_get_data(G_OBJECT(win->m_widget), "wx-caption-drag-taken") )
+        return;
+
     if (toplevel && device)
     {
         gdk_toplevel_begin_move(toplevel, device, button, x, y, time);

@@ -50,6 +50,21 @@ public:
 
     wxAuiManager& GetAuiManager()  { return m_mgr; }
 
+#ifdef __WXGTK4__
+public:
+    // Where a floating frame cannot be dragged, dragging its caption starts a
+    // drag and drop session instead of a compositor move, so that the managed
+    // frame is told where the pointer went. See #167.
+    void GTKAddCaptionDragSource();
+
+    // The band at the top of the frame that drags it, in its own
+    // coordinates. Comes from wxMiniFrame, which draws it.
+    int GTKGetCaptionHeight() const { return m_miniEdge + m_miniTitle; }
+
+    // The name of the pane this frame holds, which is what a drop carries.
+    wxString GTKGetPaneName() const;
+#endif // __WXGTK4__
+
 protected:
     virtual void OnMoveStart();
     virtual void OnMoving(const wxRect& windowRect, wxDirection dir);

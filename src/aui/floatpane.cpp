@@ -21,6 +21,10 @@
 #if wxUSE_AUI
 
 #include "wx/aui/framemanager.h"
+
+#ifdef __WXGTK4__
+    #include "wx/gtk/private/wrapgtk.h"
+#endif
 #include "wx/aui/floatpane.h"
 #include "wx/aui/dockart.h"
 
@@ -64,7 +68,105 @@ wxAuiFloatingFrame::wxAuiFloatingFrame(wxWindow* parent,
 #endif
 
     SetExtraStyle(wxWS_EX_PROCESS_IDLE);
+
+#ifdef __WXGTK4__
+    // Only where the frame cannot be dragged the ordinary way: everywhere
+    // else the compositor move works and reports itself, and this would
+    // replace something that is not broken.
+    if ( owner_mgr && !wxAuiManager::CanDragFloatingFrame(
+                                     owner_mgr->GetManagedWindow()) )
+        GTKAddCaptionDragSource();
+#endif // __WXGTK4__
 }
+
+
+#ifdef __WXGTK4__
+
+// Dragging a floating frame's caption normally hands the pointer to the
+// compositor, which then moves the window and reports nothing back -- so the
+// managed frame is never told where the pointer went and the pane cannot be
+// docked again. See #167.
+//
+// Where that is the case, the caption starts a drag and drop session instead.
+// The protocol does report a drag across surfaces, in the coordinates of the
+// surface being dropped on, which is exactly what the dock decision needs.
+//
+// The source is added in the capture phase so that it sees the press before
+// wxMiniFrame's own gesture does. When the press is not on the caption it
+// declines to produce a payload, no drag starts, and that gesture goes on to
+// handle it as before -- so resizing and everything else is untouched.
+
+extern "C" {
+
+static GdkContentProvider*
+wxgtk_aui_caption_drag_prepare(GtkDragSource* WXUNUSED(source),
+                               double WXUNUSED(x), double y, gpointer data)
+{
+    wxAuiFloatingFrame* const self = static_cast<wxAuiFloatingFrame*>(data);
+
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        fprintf(stderr, "AUIFLOAT prepare y=%.1f captionHeight=%d name=%s\n",
+                y, self->GTKGetCaptionHeight(),
+                static_cast<const char*>(self->GTKGetPaneName().utf8_str()));
+        fflush(stderr);
+    }
+
+    if ( y >= self->GTKGetCaptionHeight() )
+        return nullptr;
+
+    const wxString name = self->GTKGetPaneName();
+    if ( name.empty() )
+        return nullptr;
+
+    const wxString payload = "wxaui-pane:" + name;
+
+    GValue value = G_VALUE_INIT;
+    g_value_init(&value, G_TYPE_STRING);
+    g_value_set_string(&value, payload.utf8_str());
+
+    GdkContentProvider* const provider =
+        gdk_content_provider_new_for_value(&value);
+    g_value_unset(&value);
+
+    return provider;
+}
+
+} // extern "C"
+
+wxString wxAuiFloatingFrame::GTKGetPaneName() const
+{
+    if ( !m_ownerMgr || !m_paneWindow )
+        return wxString();
+
+    return m_ownerMgr->GetPane(m_paneWindow).name;
+}
+
+void wxAuiFloatingFrame::GTKAddCaptionDragSource()
+{
+    GtkWidget* const widget = GetHandle();
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        fprintf(stderr, "AUIFLOAT drag source %s\n",
+                widget ? "attached" : "NOT attached, no widget yet");
+        fflush(stderr);
+    }
+    if ( !widget )
+        return;
+
+    // Tell wxMiniFrame to leave the caption drag alone: its own gesture runs
+    // first and claims the sequence, which would cancel this one.
+    g_object_set_data(G_OBJECT(widget), "wx-caption-drag-taken",
+                      GINT_TO_POINTER(1));
+
+    GtkDragSource* const source = gtk_drag_source_new();
+    gtk_drag_source_set_actions(source, GDK_ACTION_MOVE);
+    g_signal_connect(source, "prepare",
+                     G_CALLBACK(wxgtk_aui_caption_drag_prepare), this);
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(source));
+}
+
+#endif // __WXGTK4__
 
 wxAuiFloatingFrame::~wxAuiFloatingFrame()
 {
