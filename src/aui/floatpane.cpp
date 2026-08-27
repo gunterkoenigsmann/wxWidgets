@@ -146,12 +146,30 @@ GType wx_aui_pane_drag_data_get_type(void)
 // mouse capture and by a drag session at the same time, and releasing outside
 // any window leaves the drag icon stranded on screen with nothing to end it.
 static void
-wxgtk_aui_caption_pressed(GtkGestureClick* WXUNUSED(gesture),
+wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
                           int WXUNUSED(n_press), double WXUNUSED(x),
                           double WXUNUSED(y), gpointer data)
 {
+    // A caption drag can be one thing or the other, and they are mutually
+    // exclusive: a compositor move puts the window anywhere on the desktop
+    // but reports nothing, so it can never dock; a drag and drop session
+    // reports where it went and can dock, but cannot place a window, since
+    // no client may position its own toplevel here.
+    //
+    // Plain drag docks, which is the one that was impossible before. Holding
+    // shift moves the window instead, so free placement is not lost. Shift
+    // rather than alt or meta because a compositor is likely to have taken
+    // those for its own window moving already.
+    const GdkModifierType state =
+        gtk_event_controller_get_current_event_state(
+            GTK_EVENT_CONTROLLER(gesture));
+
+    const bool wantsMove = (state & GDK_SHIFT_MASK) != 0;
+
     g_object_set_data(G_OBJECT(data), "wx-caption-press-seen",
-                      GINT_TO_POINTER(1));
+                      GINT_TO_POINTER(wantsMove ? 0 : 1));
+    g_object_set_data(G_OBJECT(data), "wx-caption-drag-taken",
+                      GINT_TO_POINTER(wantsMove ? 0 : 1));
 }
 
 static GdkContentProvider*
@@ -232,11 +250,6 @@ void wxAuiFloatingFrame::GTKAddCaptionDragSource()
     }
     if ( !widget )
         return;
-
-    // Tell wxMiniFrame to leave the caption drag alone: its own gesture runs
-    // first and claims the sequence, which would cancel this one.
-    g_object_set_data(G_OBJECT(widget), "wx-caption-drag-taken",
-                      GINT_TO_POINTER(1));
 
     GtkGesture* const press = gtk_gesture_click_new();
     g_signal_connect(press, "pressed",
