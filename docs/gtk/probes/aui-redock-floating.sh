@@ -79,15 +79,23 @@ else
   unset DISPLAY
   SWAYSOCK=$("$HERE/sway-up.sh") || { echo "  HARNESS no compositor"; exit 1; }
   export SWAYSOCK
-  LOG=/tmp/redock-wayland.log
-  ( AUIDOCK_START_FLOATING=1 WXAUI_DRAGLOG=1 timeout 60 $AUIDOCK > $LOG 2>&1 ) &
-  sleep 6
-  swaymsg '[title="Tree Pane"] move position 60 60' >/dev/null 2>&1; sleep 1
   origin() {
     swaymsg -t get_tree |
       jq -r --arg t "$1" '.. | objects | select(.name == $t) |
                           "\(.rect.x) \(.rect.y)"'
   }
+  LOG=/tmp/redock-wayland.log
+  ( AUIDOCK_START_FLOATING=1 WXAUI_DRAGLOG=1 timeout 60 $AUIDOCK > $LOG 2>&1 ) &
+  sleep 6
+  # Poll for both windows rather than sleeping a fixed time: a run that
+  # starts before they are mapped reports them missing, which reads like a
+  # failure of the thing under test rather than of the wait.
+  for _ in $(seq 60); do
+    [ -n "$(origin auidock)" ] && [ -n "$(origin "Tree Pane")" ] && break
+    sleep 0.25
+  done
+
+  swaymsg '[title="Tree Pane"] move position 60 60' >/dev/null 2>&1; sleep 1
   read MX MY <<< "$(origin auidock)"
   read PX PY <<< "$(origin "Tree Pane")"
   if [ -z "$MX" ] || [ -z "$PX" ]; then

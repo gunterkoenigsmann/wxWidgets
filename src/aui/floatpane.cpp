@@ -147,29 +147,63 @@ GType wx_aui_pane_drag_data_get_type(void)
 // any window leaves the drag icon stranded on screen with nothing to end it.
 static void
 wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
-                          int WXUNUSED(n_press), double WXUNUSED(x),
-                          double WXUNUSED(y), gpointer data)
+                          int WXUNUSED(n_press), double x, double y,
+                          gpointer data)
 {
-    // A caption drag can be one thing or the other, and they are mutually
-    // exclusive: a compositor move puts the window anywhere on the desktop
-    // but reports nothing, so it can never dock; a drag and drop session
-    // reports where it went and can dock, but cannot place a window, since
-    // no client may position its own toplevel here.
-    //
-    // Plain drag docks, which is the one that was impossible before. Holding
-    // shift moves the window instead, so free placement is not lost. Shift
-    // rather than alt or meta because a compositor is likely to have taken
-    // those for its own window moving already.
+    wxAuiFloatingFrame* const self = static_cast<wxAuiFloatingFrame*>(data);
+    GtkWidget* const widget = self ? self->GetHandle() : nullptr;
+    if ( !widget )
+        return;
+
+    // Decide on every press, and clear the flags when this one is not on the
+    // caption at all: leaving them set from an earlier press makes the next
+    // drag do whatever the last one did.
+    const bool onCaption = self && y < self->GTKGetCaptionHeight();
+
     const GdkModifierType state =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
+    const bool wantsMove = onCaption && (state & GDK_SHIFT_MASK) != 0;
 
-    const bool wantsMove = (state & GDK_SHIFT_MASK) != 0;
+    g_object_set_data(G_OBJECT(widget), "wx-caption-press-seen",
+                      GINT_TO_POINTER(onCaption && !wantsMove ? 1 : 0));
+    g_object_set_data(G_OBJECT(widget), "wx-caption-drag-taken",
+                      GINT_TO_POINTER(onCaption ? 1 : 0));
 
-    g_object_set_data(G_OBJECT(data), "wx-caption-press-seen",
-                      GINT_TO_POINTER(wantsMove ? 0 : 1));
-    g_object_set_data(G_OBJECT(data), "wx-caption-drag-taken",
-                      GINT_TO_POINTER(wantsMove ? 0 : 1));
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        fprintf(stderr, "AUIFLOAT press y=%.1f caption=%d shift=%d -> %s\n",
+                y, onCaption ? 1 : 0, (state & GDK_SHIFT_MASK) ? 1 : 0,
+                !onCaption ? "wxMiniFrame's own handling"
+                           : wantsMove ? "compositor move"
+                                       : "drag and drop");
+        fflush(stderr);
+    }
+
+    if ( !wantsMove )
+        return;
+
+    // Perform the move here rather than letting wxMiniFrame do it. Its
+    // handler tests its resize border before the caption, so a press near the
+    // top edge became a resize -- which is what shift-dragging a pane did.
+    GdkSurface* const surface = gtk_native_get_surface(GTK_NATIVE(widget));
+    if ( !surface || !GDK_IS_TOPLEVEL(surface) )
+        return;
+
+    GdkEventSequence* const seq =
+        gtk_gesture_single_get_current_sequence(GTK_GESTURE_SINGLE(gesture));
+    GdkEvent* const event = gtk_gesture_get_last_event(GTK_GESTURE(gesture),
+                                                       seq);
+    if ( !event )
+        return;
+
+    gdk_toplevel_begin_move(GDK_TOPLEVEL(surface),
+                            gdk_event_get_device(event),
+                            gtk_gesture_single_get_current_button(
+                                GTK_GESTURE_SINGLE(gesture)),
+                            x, y, gdk_event_get_time(event));
+
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static GdkContentProvider*
@@ -253,7 +287,7 @@ void wxAuiFloatingFrame::GTKAddCaptionDragSource()
 
     GtkGesture* const press = gtk_gesture_click_new();
     g_signal_connect(press, "pressed",
-                     G_CALLBACK(wxgtk_aui_caption_pressed), widget);
+                     G_CALLBACK(wxgtk_aui_caption_pressed), this);
     gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(press),
                                                GTK_PHASE_CAPTURE);
     gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(press));

@@ -226,7 +226,19 @@ gtk_window_button_press_callback(GtkGestureClick* gesture,
     // does under Wayland, where the compositor move below cannot be followed
     // and so leaves a pane that can never be docked again; see #167. Leave
     // the sequence unclaimed so that whatever set this can act on it.
-    if ( g_object_get_data(G_OBJECT(win->m_widget), "wx-caption-drag-taken") )
+    const bool taken =
+        g_object_get_data(G_OBJECT(win->m_widget),
+                          "wx-caption-drag-taken") != nullptr;
+
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        fprintf(stderr, "MINIFRAME caption press: drag-taken=%d, %s\n",
+                taken ? 1 : 0,
+                taken ? "yielding" : "beginning the compositor move");
+        fflush(stderr);
+    }
+
+    if ( taken )
         return;
 
     if (toplevel && device)
