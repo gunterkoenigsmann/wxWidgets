@@ -150,6 +150,12 @@ wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
                           int WXUNUSED(n_press), double x, double y,
                           gpointer data)
 {
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        fprintf(stderr, "AUIFLOAT press handler entered\n");
+        fflush(stderr);
+    }
+
     wxAuiFloatingFrame* const self = static_cast<wxAuiFloatingFrame*>(data);
     GtkWidget* const widget = self ? self->GetHandle() : nullptr;
     if ( !widget )
@@ -163,7 +169,13 @@ wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
     const GdkModifierType state =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
-    const bool wantsMove = onCaption && (state & GDK_SHIFT_MASK) != 0;
+    // WXAUI_CAPTION_MOVE makes a plain drag take the move branch, so that
+    // branch can be exercised by a driver that cannot hold a modifier down.
+    // Fork-only, like the logging; see #112.
+    const bool forceMove = wxGetEnv("WXAUI_CAPTION_MOVE", nullptr) != 0;
+
+    const bool wantsMove =
+        onCaption && (forceMove || (state & GDK_SHIFT_MASK) != 0);
 
     g_object_set_data(G_OBJECT(widget), "wx-caption-press-seen",
                       GINT_TO_POINTER(onCaption && !wantsMove ? 1 : 0));
