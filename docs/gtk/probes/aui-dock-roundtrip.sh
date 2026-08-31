@@ -73,7 +73,7 @@ else
 fi
 export LD_LIBRARY_PATH=$WXBUILD/lib
 LOG=/tmp/dockrun-$1.log
-( timeout 32 $AUIDOCK > $LOG 2>&1 ) &
+( WXAUI_CAPTION_DRAG=dock timeout 32 $AUIDOCK > $LOG 2>&1 ) &
 APP=$!
 # Poll for the geometry rather than sleeping a fixed time: under gdb or a
 # loaded machine the app needs longer, and a fixed sleep then reads an empty

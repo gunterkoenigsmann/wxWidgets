@@ -169,13 +169,25 @@ wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
     const GdkModifierType state =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
-    // WXAUI_CAPTION_MOVE makes a plain drag take the move branch, so that
-    // branch can be exercised by a driver that cannot hold a modifier down.
-    // Fork-only, like the logging; see #112.
-    const bool forceMove = wxGetEnv("WXAUI_CAPTION_MOVE", nullptr) != 0;
+    // A plain drag moves the window, which is what a caption drag does for
+    // every other window on the desktop and what it did here before docking
+    // was possible at all: the pane follows the cursor and stays where it is
+    // dropped, inside the managed frame or outside it. Shift docks instead.
+    //
+    // Moving is much the commoner of the two, which is why it is the one
+    // that costs no modifier.
+    //
+    // WXAUI_CAPTION_DRAG forces one branch or the other, so a driver that
+    // cannot hold a modifier down can still reach both. Fork-only, like the
+    // logging; see #112.
+    wxString forced;
+    wxGetEnv("WXAUI_CAPTION_DRAG", &forced);
 
-    const bool wantsMove =
-        onCaption && (forceMove || (state & GDK_SHIFT_MASK) != 0);
+    bool wantsMove = onCaption && (state & GDK_SHIFT_MASK) == 0;
+    if ( onCaption && forced == "dock" )
+        wantsMove = false;
+    else if ( onCaption && forced == "move" )
+        wantsMove = true;
 
     g_object_set_data(G_OBJECT(widget), "wx-caption-press-seen",
                       GINT_TO_POINTER(onCaption && !wantsMove ? 1 : 0));
@@ -188,7 +200,7 @@ wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
                 y, onCaption ? 1 : 0, (state & GDK_SHIFT_MASK) ? 1 : 0,
                 !onCaption ? "wxMiniFrame's own handling"
                            : wantsMove ? "compositor move"
-                                       : "drag and drop");
+                                       : "drag and drop (docking)");
         fflush(stderr);
     }
 

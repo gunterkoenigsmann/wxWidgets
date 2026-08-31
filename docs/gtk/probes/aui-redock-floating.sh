@@ -58,7 +58,8 @@ if [ "$1" = "x11" ]; then
   export DISPLAY=$D GDK_BACKEND=x11 LD_LIBRARY_PATH=$WXBUILD/lib
   unset WAYLAND_DISPLAY
   LOG=/tmp/redock-x11.log
-  ( AUIDOCK_START_FLOATING=1 WXAUI_DRAGLOG=1 timeout 60 $AUIDOCK > $LOG 2>&1 ) &
+  ( AUIDOCK_START_FLOATING=1 WXAUI_CAPTION_DRAG=dock WXAUI_DRAGLOG=1 \
+      timeout 60 $AUIDOCK > $LOG 2>&1 ) &
   sleep 6
   W=$(xdotool search --name '^Tree Pane$' | head -1)
   M=$(xdotool search --name '^auidock$' | head -1)
@@ -85,7 +86,8 @@ else
                           "\(.rect.x) \(.rect.y)"'
   }
   LOG=/tmp/redock-wayland.log
-  ( AUIDOCK_START_FLOATING=1 WXAUI_DRAGLOG=1 timeout 60 $AUIDOCK > $LOG 2>&1 ) &
+  ( AUIDOCK_START_FLOATING=1 WXAUI_CAPTION_DRAG=dock WXAUI_DRAGLOG=1 \
+      timeout 60 $AUIDOCK > $LOG 2>&1 ) &
   sleep 6
   # Poll for both windows rather than sleeping a fixed time: a run that
   # starts before they are mapped reports them missing, which reads like a
