@@ -42,6 +42,44 @@ extern bool        g_blockEventsOnScroll;
 // The decorations wxMiniFrame draws for itself: the resize gripper, the title
 // bar and the close box. Shared by every version's draw callback, which differ
 // only in how they are given something to draw on.
+
+#ifdef __WXGTK4__
+
+// The flag lives on the widget rather than in a member, so that this costs
+// nothing to anyone not using it and does not move anything already in the
+// class.
+static const char* const wxMINIFRAME_EXTRA_BUTTON = "wx-extra-caption-button";
+
+void wxMiniFrame::GTKShowExtraCaptionButton(bool show)
+{
+    if ( !m_widget )
+        return;
+
+    g_object_set_data(G_OBJECT(m_widget), wxMINIFRAME_EXTRA_BUTTON,
+                      GINT_TO_POINTER(show ? 1 : 0));
+    Refresh();
+}
+
+bool wxMiniFrame::GTKHasExtraCaptionButton() const
+{
+    return m_widget && m_miniTitle &&
+           g_object_get_data(G_OBJECT(m_widget),
+                             wxMINIFRAME_EXTRA_BUTTON) != nullptr;
+}
+
+wxRect wxMiniFrame::GTKGetExtraCaptionButtonRect() const
+{
+    if ( !GTKHasExtraCaptionButton() )
+        return wxRect();
+
+    // To the left of the close box when there is one, in its place otherwise.
+    const int right = (GetWindowStyle() & wxCLOSE_BOX) ? 38 : 18;
+
+    return wxRect(m_width - right, 3, 16, 16);
+}
+
+#endif // __WXGTK4__
+
 static void wxDrawMiniFrameDecorations(wxDC& dc, wxMiniFrame* win)
 {
     int style = win->GetWindowStyle();
@@ -80,6 +118,21 @@ static void wxDrawMiniFrameDecorations(wxDC& dc, wxMiniFrame* win)
                     win->m_miniEdge - 1 + (height - 16) / 2,
                     true );
         }
+
+#ifdef __WXGTK4__
+        // A panel with a bar down one side: the pane going back to an edge.
+        // Drawn rather than loaded so that this needs no bitmap of its own.
+        const wxRect extra = win->GTKGetExtraCaptionButtonRect();
+        if (!extra.IsEmpty())
+        {
+            dc.SetPen(wxPen(textColor));
+            dc.SetBrush(*wxTRANSPARENT_BRUSH);
+            dc.DrawRectangle(extra.x + 2, extra.y + 2, 12, 12);
+
+            dc.SetBrush(wxBrush(textColor));
+            dc.DrawRectangle(extra.x + 2, extra.y + 2, 4, 12);
+        }
+#endif // __WXGTK4__
     }
 }
 

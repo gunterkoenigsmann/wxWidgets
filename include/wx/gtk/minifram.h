@@ -56,6 +56,20 @@ public:
     bool m_isDragMove = false;
     wxSize m_dragOffset;
 #endif
+#ifdef __WXGTK4__
+    // A second caption button, for whoever needs one: wxAUI puts a "dock"
+    // button here where a pane cannot be docked by dragging it, which is the
+    // case under Wayland. See #167.
+    //
+    // Only the drawing belongs here. What the button means, and what happens
+    // when it is pressed, is the business of whatever asked for it -- and the
+    // rectangle below is what that code hit-tests against, so the two cannot
+    // disagree about where it is.
+    void GTKShowExtraCaptionButton(bool show);
+    wxRect GTKGetExtraCaptionButtonRect() const;
+    bool GTKHasExtraCaptionButton() const;
+#endif // __WXGTK4__
+
     wxBitmap  m_closeButton;
     int m_miniEdge = 0;
     int m_miniTitle = 0;

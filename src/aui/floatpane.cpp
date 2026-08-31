@@ -166,6 +166,27 @@ wxgtk_aui_caption_pressed(GtkGestureClick* gesture,
     // drag do whatever the last one did.
     const bool onCaption = self && y < self->GTKGetCaptionHeight();
 
+    // The dock button first: it sits inside the caption, so a press on it
+    // would otherwise start a drag.
+    if ( self->GTKGetExtraCaptionButtonRect().Contains(wxRound(x), wxRound(y)) )
+    {
+        if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+        {
+            fprintf(stderr, "AUIFLOAT dock button pressed\n");
+            fflush(stderr);
+        }
+
+        g_object_set_data(G_OBJECT(widget), "wx-caption-press-seen",
+                          GINT_TO_POINTER(0));
+        g_object_set_data(G_OBJECT(widget), "wx-caption-drag-taken",
+                          GINT_TO_POINTER(1));
+
+        self->GTKDockFromButton();
+        gtk_gesture_set_state(GTK_GESTURE(gesture),
+                              GTK_EVENT_SEQUENCE_CLAIMED);
+        return;
+    }
+
     const GdkModifierType state =
         gtk_event_controller_get_current_event_state(
             GTK_EVENT_CONTROLLER(gesture));
@@ -297,8 +318,40 @@ wxString wxAuiFloatingFrame::GTKGetPaneName() const
     return m_ownerMgr->GetPane(m_paneWindow).name;
 }
 
+void wxAuiFloatingFrame::GTKDockFromButton()
+{
+    if ( !m_ownerMgr || !m_paneWindow )
+        return;
+
+    // Not from inside the press: docking destroys this frame, and this is a
+    // callback running on one of its widgets.
+    wxWindow* const pane = m_paneWindow;
+    wxAuiManager* const mgr = m_ownerMgr;
+
+    mgr->CallAfter([mgr, pane]()
+        {
+            wxAuiPaneInfo& info = mgr->GetPane(pane);
+            if ( !info.IsOk() )
+                return;
+
+            info.Dock();
+            mgr->Update();
+        });
+}
+
 void wxAuiFloatingFrame::GTKAddCaptionDragSource()
 {
+    // Dragging cannot dock a pane here, so offer a button that can. See #167.
+    GTKShowExtraCaptionButton(true);
+
+    if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
+    {
+        const wxRect r = GTKGetExtraCaptionButtonRect();
+        fprintf(stderr, "AUIFLOAT dock button at %d,%d %dx%d (frame %dx%d)\n",
+                r.x, r.y, r.width, r.height, GetSize().x, GetSize().y);
+        fflush(stderr);
+    }
+
     GtkWidget* const widget = GetHandle();
     if ( wxGetEnv("WXAUI_DRAGLOG", nullptr) )
     {

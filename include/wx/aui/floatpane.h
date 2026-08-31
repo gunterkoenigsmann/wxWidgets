@@ -57,6 +57,10 @@ public:
     // frame is told where the pointer went. See #167.
     void GTKAddCaptionDragSource();
 
+    // Put the pane back where it was docked. Deferred, because it destroys
+    // this frame and is reached from a callback on one of its widgets.
+    void GTKDockFromButton();
+
     // The band at the top of the frame that drags it, in its own
     // coordinates. Comes from wxMiniFrame, which draws it.
     int GTKGetCaptionHeight() const { return m_miniEdge + m_miniTitle; }
