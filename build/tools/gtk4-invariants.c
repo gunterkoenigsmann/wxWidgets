@@ -370,6 +370,147 @@ static void test_hidden_style_is_computed_once(void)
           "nothing");
 }
 
+/* wxGTKThemeColour asks CSS for a theme's named colours, because GTK4 has no
+ * call that reads them, and it asks on a display of its own from
+ * gdk_display_open(). The second display is the whole safety of it: installing
+ * a provider on the display the application is using invalidates the widgets
+ * on it, and Bg()/Border() are called from inside GTK's layout and paint,
+ * where that is a segfault rather than a slow repaint. See #173 and the commit
+ * that reverted the first attempt at this.
+ *
+ * So the load-bearing assumption is that a provider on one display does not
+ * reach widgets on another. Nothing else in the tree checks it. */
+static void test_probe_display_isolation(void)
+{
+    printf("a second display, which is what makes the colour probe safe\n");
+
+    GdkDisplay* const own = gdk_display_open(NULL);
+    if (own == NULL)
+    {
+        soft(0, "the display server gives a second connection",
+             "wxGTKThemeColour falls back to the application's display, and "
+             "the isolation below is not what protects it");
+        return;
+    }
+
+    soft(own != gdk_display_get_default(),
+         "the second connection is a distinct GdkDisplay",
+         "same display back, so there is no isolation to rely on");
+
+    static const char* const css =
+        ".wx-isolation-probe { color: rgb(1,2,3); }";
+    GtkCssProvider* const provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(provider, css, -1);
+    gtk_style_context_add_provider_for_display(
+        own, GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    /* Both widgets are created after the provider, since a widget that
+     * already has a computed style would not see it either way -- that is the
+     * separate invariant below, and using it here would prove nothing. */
+    const GdkRGBA wanted = { 1/255.0, 2/255.0, 3/255.0, 1.0 };
+
+    GtkWidget* const here = gtk_window_new();
+    gtk_window_set_display(GTK_WINDOW(here), own);
+    GtkWidget* const onOwn = gtk_label_new("");
+    gtk_widget_add_css_class(onOwn, "wx-isolation-probe");
+    gtk_window_set_child(GTK_WINDOW(here), onOwn);
+    GdkRGBA colourOnOwn;
+    gtk_widget_get_color(onOwn, &colourOnOwn);
+
+    GtkWidget* const there = gtk_window_new();
+    GtkWidget* const onDefault = gtk_label_new("");
+    gtk_widget_add_css_class(onDefault, "wx-isolation-probe");
+    gtk_window_set_child(GTK_WINDOW(there), onDefault);
+    GdkRGBA colourOnDefault;
+    gtk_widget_get_color(onDefault, &colourOnDefault);
+
+    /* The control: without this, "the default display did not change" could
+     * equally mean the provider was never applied anywhere. */
+    check(gdk_rgba_equal(&colourOnOwn, &wanted),
+          "a provider on the second display styles widgets there",
+          "the rule did not apply at all, so the isolation check below "
+          "proves nothing");
+
+    check(!gdk_rgba_equal(&colourOnDefault, &wanted),
+          "and does not reach widgets on the application's display",
+          "providers now cross displays: the colour probe would invalidate "
+          "the application's widgets from inside GTK's layout");
+
+    gtk_window_destroy(GTK_WINDOW(there));
+    gtk_window_destroy(GTK_WINDOW(here));
+    gtk_style_context_remove_provider_for_display(own,
+                                                  GTK_STYLE_PROVIDER(provider));
+    g_object_unref(provider);
+}
+
+/* An undefined name is substituted silently -- no parsing-error signal, and an
+ * ordinary colour comes back -- so one answer cannot say whether the theme
+ * defines it. The substitute does not depend on the expression the name
+ * appeared in, while a colour that resolves does, which is why
+ * wxGTKThemeColour asks through "@name" and two different mix()es. */
+static void test_undefined_colour_name_is_detectable(void)
+{
+    printf("telling an undefined colour name from a defined one\n");
+
+    static const struct { const char* before; const char* after; } expr[] =
+    {
+        { "",     ""                     },
+        { "mix(", ", rgb(0,255,0), 0.5)" },
+        { "mix(", ", rgb(255,0,0), 0.5)" }
+    };
+
+    static const char* const names[] =
+        { "theme_bg_color", "wx_no_such_colour" };
+
+    for (guint n = 0; n < G_N_ELEMENTS(names); n++)
+    {
+        GdkRGBA answer[G_N_ELEMENTS(expr)];
+
+        for (guint i = 0; i < G_N_ELEMENTS(expr); i++)
+        {
+            char* css = g_strdup_printf(
+                ".wx-name-probe { color: %s@%s%s; }",
+                expr[i].before, names[n], expr[i].after);
+
+            GtkCssProvider* p = gtk_css_provider_new();
+            gtk_css_provider_load_from_data(p, css, -1);
+            gtk_style_context_add_provider_for_display(
+                gdk_display_get_default(), GTK_STYLE_PROVIDER(p),
+                GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+            GtkWidget* w = gtk_label_new("");
+            g_object_ref_sink(w);
+            gtk_widget_add_css_class(w, "wx-name-probe");
+            gtk_widget_get_color(w, &answer[i]);
+            g_object_unref(w);
+
+            gtk_style_context_remove_provider_for_display(
+                gdk_display_get_default(), GTK_STYLE_PROVIDER(p));
+            g_object_unref(p);
+            g_free(css);
+        }
+
+        const gboolean allSame = gdk_rgba_equal(&answer[0], &answer[1]) &&
+                                 gdk_rgba_equal(&answer[0], &answer[2]);
+
+        char* what = g_strdup_printf("'%s' reads as %s", names[n],
+                                     n == 0 ? "defined" : "undefined");
+        if (n == 0)
+        {
+            soft(!allSame, what, "the theme does not define it, so this says "
+                                 "nothing either way");
+        }
+        else
+        {
+            check(allSame, what,
+                  "an undefined name now answers differently through "
+                  "different expressions, so wxGTKThemeColour would report it "
+                  "as a colour the theme defines");
+        }
+        g_free(what);
+    }
+}
+
 static void test_theme_colour_names(void)
 {
     printf("theme colour names used by the Bg()/Border() approximation\n");
@@ -1767,6 +1908,10 @@ int main(void)
     test_scratch_hierarchy_lifecycle();
     printf("\n");
     test_hidden_style_is_computed_once();
+    printf("\n");
+    test_probe_display_isolation();
+    printf("\n");
+    test_undefined_colour_name_is_detectable();
     printf("\n");
     test_theme_colour_names();
     printf("\n");
