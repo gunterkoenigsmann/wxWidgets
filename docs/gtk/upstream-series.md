@@ -26,25 +26,26 @@ That alone takes the submission from 49k lines to 31k.
 | step | branch | files | + | − | what it is |
 |---|---|---:|---:|---:|---|
 | 1 | `01-shared` | 46 | 967 | 85 | the changes outside the GTK backend |
-| 2 | `02-private` | 20 | 1716 | 11 | private headers and the GTK+ 3 compatibility shim |
+| 2 | `02-private` | 21 | 1865 | 11 | private headers and the GTK+ 3 compatibility shim |
 | 3 | `03-core` | 8 | 4216 | 301 | wxWindow, the event loop and the wxPizza container |
 | 4 | `04-toplevel` | 9 | 1575 | 105 | top level windows, frames, dialogs and popups |
 | 5 | `05-drawing` | 9 | 1415 | 37 | device contexts, the renderer and overlays |
-| 6 | `06-menus` | 5 | 1782 | 42 | menus on GMenuModel and GAction |
+| 6 | `06-menus` | 5 | 1822 | 42 | menus on GMenuModel and GAction |
 | 7 | `07-text` | 10 | 2004 | 52 | text entry and text control |
 | 8 | `08-items` | 12 | 2206 | 160 | item containers |
-| 9 | `09-controls` | 42 | 3346 | 209 | the remaining controls |
+| 9 | `09-controls` | 42 | 3505 | 209 | the remaining controls |
 | 10 | `10-dialogs` | 10 | 774 | 32 | the standard dialogs |
 | 11 | `11-clipboard` | 4 | 1244 | 4 | clipboard and drag and drop |
 | 12 | `12-a11y` | 2 | 1011 | 0 | accessibility |
 | 13 | `13-taskbar` | 3 | 1227 | 43 | the taskbar icon and the status notifier |
 | 14 | `14-webview` | 4 | 580 | 77 | wxWebView on WebKitGTK 6 |
-| 15 | `15-rest` | 6 | 246 | 8 | the last of the backend |
+| 15 | `15-rest` | 5 | 97 | 8 | the last of the backend |
 | 16 | `16-tests` | 37 | 2572 | 146 | tests and samples |
-| 17 | `17-build` | 32 | 3805 | 53 | the build system, the configure switch and CI |
+| 17 | `17-build` | 33 | 4085 | 53 | the build system, the configure switch and CI |
 
-30,686 insertions across 260 files. The largest step is 4,216 lines and the
-median is about 1,600, which is the size the request asked for.
+31,165 insertions across 260 files, counted from today's tip. The largest
+step is 4,216 lines and the median is 1,575, which is the size the request
+asked for.
 
 ## Why this order
 
@@ -78,6 +79,35 @@ half -- "rewrite Git history in case there were any later corrections that it
 would make sense to fold in earlier commits" -- is answered by construction:
 there are no later corrections to fold in, because each file appears once.
 
+## What it is based on, and how far that has drifted
+
+The series starts at `1e8311d` (22 August), which is where this fork left
+upstream. Upstream master is **126 commits ahead** of that as of `0820518`
+(1 September), and the base is still an ancestor of it, so this rebases
+rather than needing a new branch.
+
+Measured against that tip:
+
+| | |
+|---|---|
+| files changed on both sides since the base | 37 |
+| files that actually conflict on a test merge | **8** |
+
+```
+.github/workflows/ci_mac.yml   demos/life/life.cpp
+src/generic/caret.cpp          tests/controls/checkboxtest.cpp
+tests/controls/pickertest.cpp  tests/controls/textctrltest.cpp
+tests/controls/toolbooktest.cpp tests/menu/menu.cpp
+```
+
+Some of those are conflicts with our own work: `caret.cpp` and `life.cpp` are
+fixes upstream has already taken from this fork, so both sides carry a version
+of the same change and the resolution is to keep upstream's. That should be
+done before the series is offered, not while it is being reviewed, and the
+split regenerated from the rebased branch afterwards -- the script takes the
+final state of each file, so it costs one rerun and one rerun of the build
+check.
+
 ## What was verified
 
 | | |
@@ -86,8 +116,19 @@ there are no later corrections to fold in, because each file appears once.
 | step 1 keeps the existing build green | GTK+ 3, configured and built from a clean directory at that step: **rc=0** |
 | step 16 keeps it green | the whole port except the build system, GTK+ 3, clean configure: **rc=0** |
 | the series produces the port | step 17 under GTK4: builds, and the GUI suite passes **554 cases, 43,000 assertions** |
+| **every step in between builds too** | all 17 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors, 0 warnings** each |
 
-Steps 2 to 15 were not each configured and built separately: each is a subset of
-the file changes that step 16 contains, and step 16 is green. That is an
-argument rather than a measurement, and it is worth saying which of the two it
-is.
+That last row replaces an argument that was wrong. It used to say steps 2 to 15
+did not need building because each is a subset of what step 16 contains and
+step 16 is green -- true of the file *contents*, and no use, because a step is
+also missing everything the later steps bring. `src/gtk/window.cpp` arrives in
+step 3 and calls `wxGtkScrollbarGetAdjustment()`, which is declared in
+`include/wx/gtk/private.h`; that header matched no rule and fell through to
+step 15. **Steps 3 to 14 did not compile** -- twenty errors each, in the middle
+of the series a reviewer is being asked to go through one at a time.
+
+The rule now takes `private.h` as well as `private/`, and the check that found
+it is `build/tools/build-upstream-series.sh`, so it can be repeated whenever
+the split is regenerated. It builds each step incrementally on the one before,
+which is what makes seventeen builds affordable; a clean build of the first and
+the last is still worth doing on its own.

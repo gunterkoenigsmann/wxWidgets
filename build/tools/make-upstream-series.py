@@ -37,6 +37,10 @@ Usage:
 
 Check afterwards that nothing was dropped:
     git diff upstream-series/17-build <port branch> -- . ':!docs' ':!CLAUDE.md'
+
+and that every step still builds, which is what catches a file landing in a
+later group than the code calling it:
+    build/tools/build-upstream-series.sh
 """
 
 import subprocess, collections, sys, os
@@ -56,7 +60,11 @@ RULES = [
                   or p.startswith(".github/") or p.startswith("misc/")
                   or p in ("configure","configure.ac","Makefile.in","CLAUDE.md"))),
  ("02-private",    "GTK4: private headers and the GTK+ 3 compatibility shim",
-   lambda p: p.startswith("include/wx/gtk/private/")),
+   # private.h as well as private/: window.cpp calls
+   # wxGtkScrollbarGetAdjustment() from it, so a step that carries window.cpp
+   # without it does not compile.
+   lambda p: p.startswith("include/wx/gtk/private/")
+             or p == "include/wx/gtk/private.h"),
  ("03-core",       "GTK4: wxWindow, the event loop and the wxPizza container",
    lambda p: p in ("src/gtk/window.cpp","src/gtk/win_gtk.cpp","src/gtk/evtloop.cpp","src/gtk/app.cpp","src/gtk/utilsgtk.cpp","src/gtk/private.cpp","include/wx/gtk/window.h","include/wx/gtk/app.h","include/wx/gtk/evtloop.h")),
  ("04-toplevel",   "GTK4: top level windows, frames, dialogs and popups",
