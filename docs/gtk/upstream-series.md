@@ -21,6 +21,31 @@ working notes: design documents, probe programs, progress reports. They are
 what the port was built with rather than part of it, and they are left out.
 That alone takes the submission from 49k lines to 31k.
 
+**The fork's own CI changes are left out too** (#112). Seven workflows carry
+this branch in their `push` and `pull_request` filters, because upstream's
+filters are `branches: [master]` and without that nothing here would ever be
+built; `code_checks.yml` also runs this fork's commit-attribution check. None
+of that means anything upstream. Each such place is delimited:
+
+```yaml
+    # Fork only, not for upstream: <why>
+    # Upstream has: branches: [ master ]      # when the fork reformatted
+    ...
+    # End fork only.
+```
+
+and the generator removes the region, restoring the `Upstream has:` line
+where there is one -- two of the seven had a one-line list rewritten into a
+block to add the branch, so deleting our line alone would have left a
+gratuitous reformatting in the patch. The check #112 asks for is that
+`git grep "Fork only, not for upstream"` finds nothing in the series, and it
+finds nothing.
+
+What is *not* stripped, because it is a real contribution rather than local
+scaffolding: the GTK4 build job in `ci.yml`, the GTK4 invariants step, and
+`check-gtk-min-versions` in `code_checks.yml`. Whether upstream wants a GTK4
+job before the port lands is a question for them, and it is #106's.
+
 ## The split
 
 | step | branch | files | + | − | what it is |

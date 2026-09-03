@@ -114,6 +114,60 @@ if "--dry" in sys.argv:
         print("%-13s %3d Dateien  %s" % (name, len(files[name]), desc))
     sys.exit()
 
+FORK_BEGIN = "# Fork only, not for upstream"
+FORK_END   = "# End fork only."
+UPSTREAM_HAS = "# Upstream has: "
+
+def strip_fork_only(path):
+    """Take out what this fork needs and upstream does not.
+
+    A region runs from a FORK_BEGIN comment to a FORK_END one. If a line
+    inside it says "# Upstream has: X", the region is replaced by X at the
+    region's indentation -- that is for the places where the fork's version
+    reformatted something rather than only adding to it. Otherwise the region
+    is simply removed.
+    """
+    try:
+        text = open(path, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if FORK_BEGIN not in text:
+        return False
+
+    out, skipping, replacement, indent = [], False, None, ""
+    justClosed = False
+    for line in text.split("\n"):
+        if not skipping and FORK_BEGIN in line:
+            skipping = True
+            indent = line[:len(line) - len(line.lstrip())]
+            replacement = None
+            continue
+        if skipping:
+            if UPSTREAM_HAS in line:
+                replacement = line.split(UPSTREAM_HAS, 1)[1]
+            if FORK_END in line:
+                skipping = False
+                if replacement is not None:
+                    out.append(indent + replacement)
+                else:
+                    justClosed = True
+            continue
+        # Removing a whole block leaves the blank line above it and the one
+        # below it next to each other, which is a diff of its own.
+        if justClosed and not line.strip() and out and not out[-1].strip():
+            justClosed = False
+            continue
+        justClosed = False
+        out.append(line)
+
+    if skipping:
+        print("FEHLER: unbeendete Fork-only-Region in", path)
+        sys.exit(1)
+
+    open(path, "w", encoding="utf-8").write("\n".join(out))
+    return True
+
+
 def run(*args, **kw):
     r = subprocess.run(args, capture_output=True, text=True, **kw)
     if r.returncode:
@@ -131,6 +185,14 @@ for name, desc, _ in RULES:
     # take this group's final state from the port branch
     for i in range(0, len(paths), 60):
         run("git","checkout",TIP,"--",*paths[i:i+60])
+    # The fork's own CI triggers and checks stay here and do not go upstream;
+    # see #112. This is what makes the grep in that issue return nothing.
+    for p in paths:
+        # Only the workflows carry these, and restricting it here keeps the
+        # script from stripping its own marker constants when it lands in
+        # 17-build.
+        if p.startswith(".github/") and os.path.exists(p):
+            strip_fork_only(p)
     msg = ("%s\n\n"
            "One step of the GTK4 port, split for review as upstream asked (#175).\n"
            "The series is cumulative: this applies on top of %s and the whole\n"

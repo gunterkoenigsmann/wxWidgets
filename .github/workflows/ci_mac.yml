@@ -3,11 +3,13 @@ name: Mac builds
 on:
   workflow_dispatch:
   push:
+    # Fork only, not for upstream: without this branch here
+    # none of these workflows ever run on any of the port's commits.
+    # Upstream has: branches: [ master ]
     branches:
       - master
-      # Fork only, not for upstream: without this branch here none of
-      # these workflows ever run on any of the port's commits.
       - claude/gtk4-wxwidgets-port-plan-pwo52u
+    # End fork only.
     paths-ignore:
     - '.circleci/**'
     - '.github/ISSUE_TEMPLATE/**'
@@ -36,11 +38,13 @@ on:
     - 'CMakeLists.txt'
     - 'wxwidgets.props'
   pull_request:
+    # Fork only, not for upstream: without this branch here
+    # none of these workflows ever run on any of the port's commits.
+    # Upstream has: branches: [ master ]
     branches:
       - master
-      # Fork only, not for upstream: without this branch here none of
-      # these workflows ever run on any of the port's commits.
       - claude/gtk4-wxwidgets-port-plan-pwo52u
+    # End fork only.
     paths-ignore:
     - '.circleci/**'
     - '.github/ISSUE_TEMPLATE/**'
@@ -91,15 +95,16 @@ jobs:
       matrix:
         include:
         - name: wxMac ARM ASAN not compatible
-          # Fork only, not for upstream: upstream runs this one on its own
-          # self-hosted Apple Silicon machine. This fork has no such runner, so
-          # left as "self-hosted" the job never starts at all -- it waits out
-          # GitHub's 24 hour queue limit and is then cancelled, which drags the
-          # whole run to "cancelled" even when every hosted job passed. That
-          # hid the macOS result rather than reporting it: see #169.
-          #
-          # macos-14 is Apple Silicon too, and two entries below already build
-          # on it, so the fork runs this for real instead of skipping it.
+          # Fork only, not for upstream: the line below reads the same in
+          # either tree, but the reason for it is this fork's -- left as
+          # plain "self-hosted" the job never starts here, waits out GitHub's
+          # 24 hour queue limit, is cancelled, and drags the whole run to
+          # "cancelled" with it, hiding a macOS result that had passed. See
+          # #169.
+          # End fork only.
+          # Only wxWidgets/wxWidgets has the self-hosted Apple Silicon
+          # machine; anywhere else this builds on a hosted one instead of
+          # waiting for a runner that will never appear.
           runner: ${{ github.repository == 'wxWidgets/wxWidgets' && 'self-hosted' || 'macos-14' }}
           arch: arm64
           configure_flags: --enable-std_string_conv_in_wxstring --disable-compat32 --disable-sys-libs

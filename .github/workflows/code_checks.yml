@@ -5,15 +5,17 @@ on:
   push:
     branches:
       - master
-      # Fork only, not for upstream: without this branch here none of
-      # these workflows ever run on any of the port's commits.
+      # Fork only, not for upstream: without this branch here
+      # none of these workflows ever run on any of the port's commits.
       - claude/gtk4-wxwidgets-port-plan-pwo52u
+      # End fork only.
   pull_request:
     branches:
       - master
-      # Fork only, not for upstream: without this branch here none of
-      # these workflows ever run on any of the port's commits.
+      # Fork only, not for upstream: without this branch here
+      # none of these workflows ever run on any of the port's commits.
       - claude/gtk4-wxwidgets-port-plan-pwo52u
+      # End fork only.
 
 permissions:
   contents: read
@@ -88,6 +90,9 @@ jobs:
         run: |
             python3 build/tools/check-gtk-min-versions.py
 
+  # Fork only, not for upstream: this checks the AI attribution
+  # convention agreed in #177 and #236, which is this fork's and not
+  # something upstream has any use for.
   check-commit-trailers:
     runs-on: ubuntu-latest
     name: Check Commit Trailers
@@ -108,6 +113,7 @@ jobs:
               exit 0
             fi
             python3 build/tools/check-commit-trailers.py "$base"
+  # End fork only.
 
   check-mixed-eol:
     runs-on: ubuntu-latest
