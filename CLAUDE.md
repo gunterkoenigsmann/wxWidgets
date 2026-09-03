@@ -65,3 +65,10 @@ before pushing.
 * `make -C tests test_gui` does not depend on the library, so it can
   report "up to date" and leave a binary older than the change under
   test. `rm -f tests/test_gui` first, every time.
+* After merging or rebasing onto anything that adds a virtual function,
+  build from an empty directory. An incremental build mixes objects from
+  both sides of the change, the vtable slots shift, and a virtual call
+  lands in a different function -- `GetLabel()` arrived in
+  `EnableCloseButton()`. It segfaults before the first test, in code that
+  is not at fault, and `make clean` in a long-lived build directory is not
+  enough. This cost an afternoon and nearly a bug report against upstream.
