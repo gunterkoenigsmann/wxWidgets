@@ -72,7 +72,14 @@ def gtk(p, *names):
 # order matters: first match wins
 RULES = [
  ("01-shared",     "GTK4: the changes outside the GTK backend",
+   # src/unix and include/wx/unix are not "outside the backend" in the sense
+   # that matters here: they are built only for the Unix ports and their
+   # changes call into it -- wxGetKeyStateGTK() in utilsx11.cpp uses
+   # wxGetTopLevelGdkDisplay(), which src/gtk/window.cpp defines in step 3.
+   # A step that has the caller and not the callee does not link.
    lambda p: not (p.startswith("src/gtk/") or p.startswith("include/wx/gtk/")
+                  or p.startswith("src/unix/")
+                  or p.startswith("include/wx/unix/")
                   or p.startswith("tests/") or p.startswith("samples/")
                   or p.startswith("demos/") or p.startswith("build/")
                   or p.startswith(".github/") or p.startswith("misc/")

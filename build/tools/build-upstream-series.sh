@@ -24,7 +24,11 @@ set -u
 
 W=${1:?usage: $0 <worktree> <build dir>}
 B=${2:?usage: $0 <worktree> <build dir>}
-: "${CONFIGURE_ARGS:=--with-gtk=3 --disable-shared --without-opengl}"
+: "${CONFIGURE_ARGS:=--with-gtk=3 --without-opengl}"
+# Shared, and one executable linked against it: a static archive is
+# never linked, so a step calling a function a later step defines
+# builds perfectly and fails in whatever links it first. That is how
+# step 1 reached upstream with an undefined wxGetTopLevelGdkDisplay().
 CONFIGURE_ARGS="$CONFIGURE_ARGS --disable-stc"
 
 steps=$(cd "$W" && git branch --list 'upstream-series/*' \
@@ -66,7 +70,8 @@ for s in $steps; do
         first=0
     fi
 
-    if ( cd "$B" && make -j"$(nproc)" > "build.$name.log" 2>&1 ); then
+    if ( cd "$B" && make -j"$(nproc)" > "build.$name.log" 2>&1 &&
+         make -C samples/minimal -j"$(nproc)" >> "build.$name.log" 2>&1 ); then
         echo "$name ok"
     else
         echo "$name FAILED: $(cd "$B" && grep -m1 'error:' "build.$name.log")"
