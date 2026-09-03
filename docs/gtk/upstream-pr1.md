@@ -81,3 +81,45 @@ That is the main reason for sending this step first and alone.
 The branch is `upstream-series/01-shared` in this fork. It applies to master
 at `0820518`. If the reception is good the remaining seventeen follow in
 order; if the shape is wrong, only one patch has to be re-cut.
+
+# Step 2, and the question to ask with it
+
+`upstream-series/02-private` is pushed. It is 21 files, +1865 −11, all under
+`include/wx/gtk/private/`, so nothing outside the GTK backend sees any of it.
+
+| | |
+|---|---|
+| new headers | 4 — `access.h` (28), `dbusmenu.h` (89), `dialogasync.h` (95), `statusnotifier.h` (109) |
+| modified | 17, the largest being `gtk3-compat.h` +864, `private.h` +149, `private/event.h` +133 |
+
+`gtk3-compat.h` carries most of it and is the file that makes the rest of the
+series possible: it is where the GTK4 spellings of things GTK+ 2 and 3 do
+differently are kept, so the backend can be written once. Nothing includes the
+four new headers yet; steps 12, 13 and 10 do.
+
+## The question
+
+Whether this shape is wanted at all is worth asking in the second pull
+request rather than after the eighteenth, because the answer changes how the
+rest are prepared. Three variants, and they are not equivalent:
+
+1. **Merge each before the next is opened.** Every pull request then shows
+   only its own step. This is what the branches are cut for and it needs no
+   GitHub features, but it serialises on the maintainers: nothing can be
+   looked at in parallel.
+2. **Stacked, each based on the one before.** All eighteen can be open at
+   once and each diff still shows only its own step, but every base has to be
+   retargeted as the one under it merges, and reviewers see a chain.
+3. **All against master.** Simple to open, and wrong: PR *n* would show the
+   changes of steps 1 to *n*, so the same code is reviewed repeatedly.
+
+Only the first two are worth offering. Which of them is better is a question
+about how the maintainers want to work, not about the code, so it should be
+asked plainly and their answer taken.
+
+Worth stating with it: the order is not arbitrary and the dependency runs
+strictly backwards -- step *n* uses only what steps before it introduced.
+That is checked rather than asserted, by building every step from an empty
+directory and linking an executable against it. Step 1 reached the first
+pull request with `wxGetTopLevelGdkDisplay()` undefined precisely because
+the check did not link at the time.
