@@ -49,8 +49,14 @@ for s in $steps; do
     fi
 
     # Only the first step and the one that changes which files are compiled
-    # need configure run again.
-    if [ $first = 1 ] || [ "$name" = "17-build" ]; then
+    # need configure run again -- and that one starts from nothing, because
+    # the object lists it regenerates no longer match what is in the
+    # directory.
+    if [ "$name" = "17-build" ]; then
+        rm -rf "${B:?}"/*
+        first=1
+    fi
+    if [ $first = 1 ]; then
         if ! ( cd "$B" && "$W/configure" $CONFIGURE_ARGS \
                               > "configure.$name.log" 2>&1 ); then
             echo "$name CONFIGURE FAILED, see $B/configure.$name.log"

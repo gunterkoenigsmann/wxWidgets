@@ -45,6 +45,24 @@ later group than the code calling it:
 
 import subprocess, collections, sys, os
 
+# What the CI jobs run, kept with them so the step can be dropped whole.
+CI_RUNS = (
+    "build/tools/before_install.sh",
+    "build/tools/check-gtk-min-versions.py",
+    "build/tools/gtk4-invariants.c",
+    "misc/scripts/check_configure.sh",
+    "misc/scripts/check_files_lists.sh",
+)
+
+# This fork's own tooling, which has no meaning in upstream's tree: the two
+# scripts that produce and check this very series, and the commit attribution
+# check from #177 whose CI job is stripped with the rest of the fork-only ones.
+FORK_ONLY_FILES = (
+    "build/tools/make-upstream-series.py",
+    "build/tools/build-upstream-series.sh",
+    "build/tools/check-commit-trailers.py",
+)
+
 MB  = "0820518c97a13d0905a6e8af16b203d307586107"
 TIP = "gtk4-project/claude/gtk4-wxwidgets-port-plan-pwo52u"
 
@@ -93,9 +111,14 @@ RULES = [
    lambda p: p.startswith("src/gtk/") or p.startswith("include/wx/gtk/")),
  ("16-tests",      "GTK4: tests and samples",
    lambda p: p.startswith("tests/") or p.startswith("samples/") or p.startswith("demos/")),
- ("17-build",      "GTK4: the build system, the configure switch and CI",
-   lambda p: p in ("configure","configure.ac","Makefile.in") or p.startswith("build/")
-             or p.startswith(".github/") or p.startswith("misc/")),
+ ("17-build",      "GTK4: the build system and the configure switch",
+   lambda p: p not in CI_RUNS
+             and (p in ("configure","configure.ac","Makefile.in")
+                  or p.startswith("build/") or p.startswith("misc/"))),
+ # Last, and on its own, because upstream may not want a GTK4 job before the
+ # port itself: dropping this step drops the CI and leaves the port whole.
+ ("18-ci",         "GTK4: a CI job for the new toolkit",
+   lambda p: p.startswith(".github/") or p in CI_RUNS),
 ]
 
 out = subprocess.run(["git","diff","--numstat",MB,TIP],capture_output=True,text=True).stdout
@@ -103,6 +126,7 @@ files = collections.defaultdict(list)
 for line in out.splitlines():
     a,d,p = line.split("\t")
     if p.startswith("docs/") or p == "CLAUDE.md": continue
+    if p in FORK_ONLY_FILES: continue
     for name,_desc,fn in RULES:
         if fn(p):
             files[name].append(p); break

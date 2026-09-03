@@ -66,10 +66,11 @@ job before the port lands is a question for them, and it is #106's.
 | 14 | `14-webview` | 4 | 580 | 77 | wxWebView on WebKitGTK 6 |
 | 15 | `15-rest` | 5 | 97 | 8 | the last of the backend |
 | 16 | `16-tests` | 35 | 2492 | 130 | tests and samples |
-| 17 | `17-build` | 34 | 4164 | 53 | the build system, the configure switch and CI |
+| 17 | `17-build` | 19 | 1298 | 40 | the build system and the configure switch |
+| 18 | `18-ci` | 9 | 2463 | 9 | a CI job for the new toolkit, and what it runs |
 
-31,130 insertions across 256 files. The largest step is 4,216 lines and the
-median is 1,575, which is the size the request asked for.
+31,722 insertions across 250 files. The largest step is 4,216 lines and the
+median is 1,536, which is the size the request asked for.
 
 ## Why this order
 
@@ -78,11 +79,16 @@ can affect Windows, macOS or Qt, they are the smallest group in the series, and
 a reviewer should be able to see all of them before anything else. If step 1 is
 acceptable, nothing after it can break another port.
 
-**The build system comes last.** It is what lists the new source files and adds
+**The CI job is last and separate**, because upstream may not want a GTK4 job
+before the port itself, and because a reviewer should be able to take the port
+and leave the CI or the other way round. Dropping step 18 drops the workflow
+changes and the four scripts they run, and leaves the port whole.
+
+**The build system comes second to last.** It is what lists the new source files and adds
 the `--with-gtk=4` switch, so until it lands the existing GTK+ 2 and GTK+ 3
 builds compile exactly as before: the new files are simply not built, and the
 changes to existing files are all behind `#ifdef __WXGTK4__` or are shared
-fixes. Putting it first breaks the build at step one, which is how the first
+fixes. Putting it early breaks the build at step one, which is how the first
 version of this script was found to be wrong -- `Makefile.in` referred to
 `src/gtk/accessgtk.cpp` fourteen steps before that file existed.
 
@@ -117,11 +123,12 @@ from this fork already, so they are no longer part of what is being offered.
 
 | | |
 |---|---|
-| the split loses nothing | `git diff upstream-series/17-build <port> -- . ':!docs' ':!CLAUDE.md'` is **empty** |
+| the split loses nothing | `git diff upstream-series/18-ci <port> -- . ':!docs' ':!CLAUDE.md' ':!.github' ':!<the three scripts below>'` is **empty** |
 | step 1 keeps the existing build green | GTK+ 3, configured and built from a clean directory at that step: **rc=0** |
 | step 16 keeps it green | the whole port except the build system, GTK+ 3, clean configure: **rc=0** |
 | the series produces the port | step 17 under GTK4: builds, and the GUI suite passes **554 cases, 43,000 assertions** |
-| **every step in between builds too** | all 17 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors, 0 warnings** each |
+| **every step in between builds too** | all 18 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors, 0 warnings** each |
+| and under a toolkit with no GTK in it | steps 1 to 16 under **Qt**, all green. Steps 17 and 18 do **not** build there -- see below |
 | the port still passes on the new base | GTK4 **917 cases**, GTK+ 3 **902 cases**, both all passing; pristine upstream master as a control: **878**, all passing |
 
 That last row replaces an argument that was wrong. It used to say steps 2 to 15
@@ -138,3 +145,36 @@ it is `build/tools/build-upstream-series.sh`, so it can be repeated whenever
 the split is regenerated. It builds each step incrementally on the one before,
 which is what makes seventeen builds affordable; a clean build of the first and
 the last is still worth doing on its own.
+
+
+## One step does not build under Qt, and that is a real defect
+
+Steps 1 to 16 build under Qt as well as under GTK+ 3, which is the useful
+half: the shared changes in step 1 and everything guarded by `__WXGTK4__`
+after it leave a toolkit with no GTK in it alone.
+
+**Step 17 does not.** `make` stops with
+
+```
+No rule to make target 'corelib_dirdlgg.o'
+```
+
+from an empty build directory, so it is not a stale-build artefact. The cause
+is in `Makefile.in`: `src/generic/dirdlgg.cpp` and `src/generic/filedlgg.cpp`
+were added to `GTK_SRC` in `build/files`, which is right -- GTK4 uses the
+generic folder and file choosers because its own do not reliably open -- but
+the regenerated `Makefile.in` guards their **compile rules** with
+
+```
+@COND_TOOLKIT_GTK_TOOLKIT_VERSION_4_USE_GUI_1_WXUNIV_0@corelib_dirdlgg.o: ...
+@COND_TOOLKIT_GTK_TOOLKIT_VERSION_3_...
+@COND_TOOLKIT_GTK_TOOLKIT_VERSION_2_...
+```
+
+while listing the object in a list Qt also uses. GTK builds therefore work and
+Qt cannot build at all. `monodll_filedlgg.o` is also listed twice in a row,
+which points the same way: the file was already there for some toolkits and
+was added again rather than regenerated.
+
+This is the port's, not upstream's, and it is exactly what a per-toolkit run
+of the series check is for. It has to be fixed before step 17 is offered.
