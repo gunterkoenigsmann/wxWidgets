@@ -74,12 +74,6 @@ int wxCaretBase::GetBlinkTime()
 void wxCaretBase::SetBlinkTime(int milliseconds)
 {
     gs_blinkTime = milliseconds;
-
-    // Deliberately wxCaret-only: passing the blink time on to GtkSettings
-    // ("gtk-cursor-blink", "gtk-cursor-blink-time") would reach past wxCaret
-    // into every native widget in the process, and GtkSettings is per display.
-    // That is a decision about what this function is allowed to affect rather
-    // than something missing.
 }
 
 // ----------------------------------------------------------------------------

@@ -80,9 +80,16 @@ HandleMenuMessage(WXLRESULT* result,
 
 void NotifySysColorChange();
 
+// Hook procedure to enable dark mode for a common dialog.
+UINT_PTR CALLBACK CommonDialogHookProc(HWND hwnd, UINT uiMsg, WPARAM wParam,
+    LPARAM lParam);
 // Return true if the DarkMode_DarkTheme theme is available. This theme was
 // added in Windows 11 25H2 (build 26200).
 bool HasDarkTheme();
+
+// Draw"progress bar in dark mode: this is used when HasDarkTheme() returns
+// false as there is no native support for doing this in this case.
+void DrawGauge(wxDC& dc, const wxRect& rect, int value, int max, int flags);
 
 } // namespace wxMSWDarkMode
 
@@ -95,7 +102,7 @@ void EnableRoundCorners(HWND hwnd);
 
 // This function draws over the section where the scroll bars meet
 // to maintain a consistent theme
-void PaintScrollBarCorner(HWND hwnd);
+void PaintScrollBarCorner(wxWindow* w);
 
 } // namespace wxMSWImpl
 

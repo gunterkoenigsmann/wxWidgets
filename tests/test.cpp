@@ -22,12 +22,6 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch.hpp>
 
-// Also define our own global variables.
-namespace wxPrivate
-{
-std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
-}
-
 // for all others, include the necessary headers
 #ifndef WX_PRECOMP
     #include "wx/wx.h"
@@ -51,17 +45,14 @@ std::string wxTheCurrentTestClass, wxTheCurrentTestMethod;
 
 #ifdef __WXGTK__
     #include <glib.h>
+    #include "wx/gtk/private/backend.h"
 #endif // __WXGTK__
 #endif // wxUSE_GUI
 
 #include "wx/socket.h"
 #include "wx/evtloop.h"
 
-// __WXQT__ guard: see the longer note in tests/net/ipc.cpp. The IPC test (and
-// its server) is excluded from wxQt (cross-thread CallAfter() not processed by
-// the wxQt event loop, fixed separately on branch
-// jpmattia/wxQT-CallAfter-wxWakeUpIdle).
-#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER) && !defined(__WXQT__)
+#if wxUSE_THREADS && defined(TEST_HAS_IPC_SERVER)
     #define wxHAS_TEST_IPC_SERVER
 
     #include "net/ipc_test_server.h"
@@ -366,8 +357,7 @@ public:
 #ifdef wxHAS_TEST_IPC_SERVER
         // The IPC test re-executes this same binary as its server (with
         // WX_IPC_TEST_SERVER set), so test_gui must run the server here too,
-        // exactly as the console test does in the non-GUI OnRun() below. See the
-        // note there and tests/net/ipc.cpp for the wxQt exclusion.
+        // exactly as the console test does in the non-GUI OnRun() below.
         if ( ShouldRunTestIPCServer() )
         {
             // Suppress the idle-driven test runner: RunIPCServerUntilStopped()
@@ -584,6 +574,20 @@ bool EnableUITests()
 #else // !(__WXMSW__ || __WXGTK__ || __WXQT__)
             s_enabled = 0;
 #endif // (__WXMSW__ || __WXGTK__ || __WXQT__)
+
+#ifdef __WXGTK3__
+            // wxUIActionSimulator injects X11 events, which never reach a
+            // native Wayland client, so disable UI tests by default there
+            // (WX_UI_TESTS=1 above still overrides this).
+            if ( s_enabled == 1 && !wxGTKImpl::IsX11(nullptr) )
+            {
+                s_enabled = 0;
+                wxFprintf(stderr, wxASCII_STR(
+                    "Disabling UI tests: wxUIActionSimulator doesn't work "
+                    "when running as a native Wayland client (use "
+                    "WX_UI_TESTS=1 to force them anyway).\n"));
+            }
+#endif // __WXGTK3__
         }
     }
 

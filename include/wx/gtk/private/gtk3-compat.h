@@ -925,7 +925,7 @@ static inline gboolean wx_gtk_widget_get_focusable(GtkWidget* widget)
 #endif // !__WXGTK4__/__WXGTK4__
 
 #if defined(__WXGTK4__) || !defined(__WXGTK3__)
-static inline bool wx_is_at_least_gtk3(int /* minor */)
+static inline bool wx_is_at_least_gtk3(int /* minor */, int /* micro */ = 0)
 {
 #ifdef __WXGTK4__
     return true;
@@ -934,9 +934,9 @@ static inline bool wx_is_at_least_gtk3(int /* minor */)
 #endif
 }
 #else
-static inline bool wx_is_at_least_gtk3(int minor)
+static inline bool wx_is_at_least_gtk3(int minor, int micro = 0)
 {
-    return gtk_check_version(3, minor, 0) == nullptr;
+    return gtk_check_version(3, minor, micro) == nullptr;
 }
 #endif
 

@@ -31,13 +31,9 @@ public:
     {
     }
 
-    ~SpinCtrlDoubleTestCase()
-    {
-        delete m_spin;
-    }
 
 protected:
-    wxSpinCtrlDouble* const m_spin;
+    const std::unique_ptr<wxSpinCtrlDouble> m_spin;
 
     wxDECLARE_NO_COPY_CLASS(SpinCtrlDoubleTestCase);
 };
@@ -74,7 +70,10 @@ TEST_CASE("SpinCtrlDouble::NoEventsInCtor", "[spinctrl][spinctrldouble]")
 TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
                  "SpinCtrlDouble::Arrows", "[spinctrl][spinctrldouble]")
 {
-    EventCounter updated(m_spin, wxEVT_SPINCTRLDOUBLE);
+    if ( !EnableUITests() )
+        return;
+
+    EventCounter updated(m_spin.get(), wxEVT_SPINCTRLDOUBLE);
 
     wxUIActionSimulator sim;
 
@@ -98,6 +97,9 @@ TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
 TEST_CASE_METHOD(SpinCtrlDoubleTestCaseWrap,
                  "SpinCtrlDouble::Wrap", "[spinctrl][spinctrldouble]")
 {
+    if ( !EnableUITests() )
+        return;
+
     wxUIActionSimulator sim;
 
     m_spin->SetFocus();
@@ -127,8 +129,8 @@ TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
     // that this doesn't result in any events (as this is not something done by
     // the user).
     {
-        EventCounter updatedSpin(m_spin, wxEVT_SPINCTRLDOUBLE);
-        EventCounter updatedText(m_spin, wxEVT_TEXT);
+        EventCounter updatedSpin(m_spin.get(), wxEVT_SPINCTRLDOUBLE);
+        EventCounter updatedText(m_spin.get(), wxEVT_TEXT);
 
         m_spin->SetRange(1., 10.);
         CHECK( m_spin->GetValue() == 1. );
@@ -155,8 +157,8 @@ TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
 TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
                  "SpinCtrlDouble::Value", "[spinctrl][spinctrldouble]")
 {
-    EventCounter updatedSpin(m_spin, wxEVT_SPINCTRLDOUBLE);
-    EventCounter updatedText(m_spin, wxEVT_TEXT);
+    EventCounter updatedSpin(m_spin.get(), wxEVT_SPINCTRLDOUBLE);
+    EventCounter updatedText(m_spin.get(), wxEVT_TEXT);
 
     m_spin->SetDigits(2);
     m_spin->SetIncrement(0.1);
@@ -200,6 +202,9 @@ TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
 TEST_CASE_METHOD(SpinCtrlDoubleTestCase,
                  "SpinCtrlDouble::Increment", "[spinctrl][spinctrldouble]")
 {
+    if ( !EnableUITests() )
+        return;
+
     CHECK( m_spin->GetIncrement() == 1.0 );
 
     m_spin->SetDigits(1);

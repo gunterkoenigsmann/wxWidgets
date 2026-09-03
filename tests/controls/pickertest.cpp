@@ -25,54 +25,38 @@
 #include "asserthelper.h"
 #include "testableframe.h"
 
+#include <memory>
+
 #if wxUSE_COLOURPICKERCTRL
 
-class ColourPickerCtrlTestCase : public PickerBaseTestCase,
-                                 public CppUnit::TestCase
+class ColourPickerCtrlTestCase : public PickerBaseTestCase
 {
 public:
-    ColourPickerCtrlTestCase() { }
+    ColourPickerCtrlTestCase();
 
-    virtual void setUp() override;
-    virtual void tearDown() override;
+protected:
+    virtual wxPickerBase *GetBase() const override { return m_colour.get(); }
 
-private:
-    virtual wxPickerBase *GetBase() const override { return m_colour; }
-
-    CPPUNIT_TEST_SUITE( ColourPickerCtrlTestCase );
-        wxPICKER_BASE_TESTS();
-        CPPUNIT_TEST( ColourRoundTrip );
-        CPPUNIT_TEST( NoEventOnSetColour );
-    CPPUNIT_TEST_SUITE_END();
-
-    void ColourRoundTrip();
-    void NoEventOnSetColour();
-
-    wxColourPickerCtrl *m_colour;
+    std::unique_ptr<wxColourPickerCtrl> m_colour;
 
     wxDECLARE_NO_COPY_CLASS(ColourPickerCtrlTestCase);
 };
 
-// register in the unnamed registry so that these tests are run by default
-CPPUNIT_TEST_SUITE_REGISTRATION( ColourPickerCtrlTestCase );
+wxPICKER_BASE_TESTS(ColourPickerCtrlTestCase, "ColourPickerCtrl",
+                    "[colourpicker][picker]");
 
-// also include in its own registry so that these tests can be run alone
-CPPUNIT_TEST_SUITE_NAMED_REGISTRATION( ColourPickerCtrlTestCase,
-                                      "ColourPickerCtrlTestCase" );
-
-void ColourPickerCtrlTestCase::setUp()
+ColourPickerCtrlTestCase::ColourPickerCtrlTestCase()
 {
-    m_colour = new wxColourPickerCtrl(wxTheApp->GetTopWindow(), wxID_ANY,
-                                     *wxBLACK, wxDefaultPosition,
-                                      wxDefaultSize, wxCLRP_USE_TEXTCTRL);
+    m_colour = make_unique<wxColourPickerCtrl>(wxTheApp->GetTopWindow(),
+                                               wxID_ANY, *wxBLACK,
+                                               wxDefaultPosition,
+                                               wxDefaultSize,
+                                               wxCLRP_USE_TEXTCTRL);
 }
 
-void ColourPickerCtrlTestCase::tearDown()
-{
-    wxDELETE(m_colour);
-}
 
-void ColourPickerCtrlTestCase::ColourRoundTrip()
+TEST_CASE_METHOD(ColourPickerCtrlTestCase,
+                 "ColourPickerCtrl::ColourRoundTrip", "[colourpicker]")
 {
     const wxColour colour(0x42, 0x69, 0xAB);
 
@@ -88,9 +72,10 @@ void ColourPickerCtrlTestCase::ColourRoundTrip()
 // reports its colour through a property notify, which -- unlike the
 // "color-set" signal it replaced -- fires for our own writes as well, so the
 // notification has to be suppressed while we write.
-void ColourPickerCtrlTestCase::NoEventOnSetColour()
+TEST_CASE_METHOD(ColourPickerCtrlTestCase,
+                 "ColourPickerCtrl::NoEventOnSetColour", "[colourpicker]")
 {
-    EventCounter changed(m_colour, wxEVT_COLOURPICKER_CHANGED);
+    EventCounter changed(m_colour.get(), wxEVT_COLOURPICKER_CHANGED);
 
     m_colour->SetColour(wxColour(0x12, 0x34, 0x56));
     wxYield();
@@ -102,145 +87,93 @@ void ColourPickerCtrlTestCase::NoEventOnSetColour()
 
 #if wxUSE_DIRPICKERCTRL
 
-class DirPickerCtrlTestCase : public PickerBaseTestCase,
-                              public CppUnit::TestCase
+class DirPickerCtrlTestCase : public PickerBaseTestCase
 {
 public:
-    DirPickerCtrlTestCase() { }
+    DirPickerCtrlTestCase();
 
-    virtual void setUp() override;
-    virtual void tearDown() override;
+protected:
+    virtual wxPickerBase *GetBase() const override { return m_dir.get(); }
 
-private:
-    virtual wxPickerBase *GetBase() const override { return m_dir; }
-
-    CPPUNIT_TEST_SUITE( DirPickerCtrlTestCase );
-        wxPICKER_BASE_TESTS();
-    CPPUNIT_TEST_SUITE_END();
-
-    wxDirPickerCtrl *m_dir;
+    std::unique_ptr<wxDirPickerCtrl> m_dir;
 
     wxDECLARE_NO_COPY_CLASS(DirPickerCtrlTestCase);
 };
 
-// register in the unnamed registry so that these tests are run by default
-CPPUNIT_TEST_SUITE_REGISTRATION( DirPickerCtrlTestCase );
+wxPICKER_BASE_TESTS(DirPickerCtrlTestCase, "DirPickerCtrl",
+                    "[dirpicker][picker]");
 
-// also include in its own registry so that these tests can be run alone
-CPPUNIT_TEST_SUITE_NAMED_REGISTRATION( DirPickerCtrlTestCase,
-                                      "DirPickerCtrlTestCase" );
-
-void DirPickerCtrlTestCase::setUp()
+DirPickerCtrlTestCase::DirPickerCtrlTestCase()
 {
-    m_dir = new wxDirPickerCtrl(wxTheApp->GetTopWindow(), wxID_ANY,
-                                wxEmptyString, wxDirSelectorPromptStr,
-                                wxDefaultPosition, wxDefaultSize,
-                                wxDIRP_USE_TEXTCTRL);
+    m_dir = make_unique<wxDirPickerCtrl>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                         wxEmptyString, wxDirSelectorPromptStr,
+                                         wxDefaultPosition, wxDefaultSize,
+                                         wxDIRP_USE_TEXTCTRL);
 }
 
-void DirPickerCtrlTestCase::tearDown()
-{
-    wxDELETE(m_dir);
-}
 
 #endif //wxUSE_DIRPICKERCTRL
 
 #if wxUSE_FILEPICKERCTRL
 
-class FilePickerCtrlTestCase : public PickerBaseTestCase,
-                               public CppUnit::TestCase
+class FilePickerCtrlTestCase : public PickerBaseTestCase
 {
 public:
-    FilePickerCtrlTestCase() { }
+    FilePickerCtrlTestCase();
 
-    virtual void setUp() override;
-    virtual void tearDown() override;
+protected:
+    virtual wxPickerBase *GetBase() const override { return m_file.get(); }
 
-private:
-    virtual wxPickerBase *GetBase() const override { return m_file; }
-
-    CPPUNIT_TEST_SUITE( FilePickerCtrlTestCase );
-        wxPICKER_BASE_TESTS();
-    CPPUNIT_TEST_SUITE_END();
-
-    wxFilePickerCtrl *m_file;
+    std::unique_ptr<wxFilePickerCtrl> m_file;
 
     wxDECLARE_NO_COPY_CLASS(FilePickerCtrlTestCase);
 };
 
-// register in the unnamed registry so that these tests are run by default
-CPPUNIT_TEST_SUITE_REGISTRATION( FilePickerCtrlTestCase );
+wxPICKER_BASE_TESTS(FilePickerCtrlTestCase, "FilePickerCtrl",
+                    "[filepicker][picker]");
 
-// also include in its own registry so that these tests can be run alone
-CPPUNIT_TEST_SUITE_NAMED_REGISTRATION( FilePickerCtrlTestCase,
-                                      "FilePickerCtrlTestCase" );
-
-void FilePickerCtrlTestCase::setUp()
+FilePickerCtrlTestCase::FilePickerCtrlTestCase()
 {
-    m_file = new wxFilePickerCtrl(wxTheApp->GetTopWindow(), wxID_ANY,
-                                  wxEmptyString, wxFileSelectorPromptStr,
-                                  wxFileSelectorDefaultWildcardStr,
-                                  wxDefaultPosition, wxDefaultSize,
-                                  wxFLP_USE_TEXTCTRL);
+    m_file = make_unique<wxFilePickerCtrl>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                           wxEmptyString,
+                                           wxFileSelectorPromptStr,
+                                           wxFileSelectorDefaultWildcardStr,
+                                           wxDefaultPosition, wxDefaultSize,
+                                           wxFLP_USE_TEXTCTRL);
 }
 
-void FilePickerCtrlTestCase::tearDown()
-{
-    wxDELETE(m_file);
-}
 
 #endif //wxUSE_FILEPICKERCTRL
 
 #if wxUSE_FONTPICKERCTRL
 
-class FontPickerCtrlTestCase : public PickerBaseTestCase,
-                               public CppUnit::TestCase
+class FontPickerCtrlTestCase : public PickerBaseTestCase
 {
 public:
-    FontPickerCtrlTestCase() { }
+    FontPickerCtrlTestCase();
 
-    virtual void setUp() override;
-    virtual void tearDown() override;
+protected:
+    virtual wxPickerBase *GetBase() const override { return m_font.get(); }
 
-private:
-    virtual wxPickerBase *GetBase() const override { return m_font; }
-
-    CPPUNIT_TEST_SUITE( FontPickerCtrlTestCase );
-        wxPICKER_BASE_TESTS();
-        CPPUNIT_TEST( ColourSelection );
-        CPPUNIT_TEST( FontRoundTrip );
-        CPPUNIT_TEST( NoEventOnSetFont );
-    CPPUNIT_TEST_SUITE_END();
-
-    void ColourSelection();
-    void FontRoundTrip();
-    void NoEventOnSetFont();
-
-    wxFontPickerCtrl *m_font;
+    std::unique_ptr<wxFontPickerCtrl> m_font;
 
     wxDECLARE_NO_COPY_CLASS(FontPickerCtrlTestCase);
 };
 
-// register in the unnamed registry so that these tests are run by default
-CPPUNIT_TEST_SUITE_REGISTRATION( FontPickerCtrlTestCase );
+wxPICKER_BASE_TESTS(FontPickerCtrlTestCase, "FontPickerCtrl",
+                    "[fontpicker][picker]");
 
-// also include in its own registry so that these tests can be run alone
-CPPUNIT_TEST_SUITE_NAMED_REGISTRATION( FontPickerCtrlTestCase,
-                                      "FontPickerCtrlTestCase" );
-
-void FontPickerCtrlTestCase::setUp()
+FontPickerCtrlTestCase::FontPickerCtrlTestCase()
 {
-    m_font = new wxFontPickerCtrl(wxTheApp->GetTopWindow(), wxID_ANY,
-                                  wxNullFont, wxDefaultPosition, wxDefaultSize,
-                                  wxFNTP_USE_TEXTCTRL);
+    m_font = make_unique<wxFontPickerCtrl>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                           wxNullFont,
+                                           wxDefaultPosition, wxDefaultSize,
+                                           wxFNTP_USE_TEXTCTRL);
 }
 
-void FontPickerCtrlTestCase::tearDown()
-{
-    wxDELETE(m_font);
-}
 
-void FontPickerCtrlTestCase::ColourSelection()
+TEST_CASE_METHOD(FontPickerCtrlTestCase, "FontPickerCtrl::ColourSelection",
+                 "[fontpicker]")
 {
     wxColour selectedColour(0xFF4269UL);
 
@@ -248,11 +181,12 @@ void FontPickerCtrlTestCase::ColourSelection()
 
     m_font->SetSelectedColour(selectedColour);
 
-    CPPUNIT_ASSERT_EQUAL_MESSAGE("Font picker did not react to color selection",
-        m_font->GetSelectedColour(), selectedColour);
+    INFO("Font picker did not react to color selection");
+    CHECK(selectedColour == m_font->GetSelectedColour());
 }
 
-void FontPickerCtrlTestCase::FontRoundTrip()
+TEST_CASE_METHOD(FontPickerCtrlTestCase,
+                 "FontPickerCtrl::FontRoundTrip", "[fontpicker]")
 {
     // A face the picker cannot possibly be showing already, in a size that is
     // not the default either, so that neither half can pass by accident.
@@ -273,9 +207,10 @@ void FontPickerCtrlTestCase::FontRoundTrip()
 
 // See the comment on ColourPickerCtrlTestCase::NoEventOnSetColour(): the same
 // property-notify trap applies to the GTK4 font button.
-void FontPickerCtrlTestCase::NoEventOnSetFont()
+TEST_CASE_METHOD(FontPickerCtrlTestCase,
+                 "FontPickerCtrl::NoEventOnSetFont", "[fontpicker]")
 {
-    EventCounter changed(m_font, wxEVT_FONTPICKER_CHANGED);
+    EventCounter changed(m_font.get(), wxEVT_FONTPICKER_CHANGED);
 
     wxFont font(*wxNORMAL_FONT);
     font.SetPointSize(font.GetPointSize() + 5);

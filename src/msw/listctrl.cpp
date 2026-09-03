@@ -911,7 +911,7 @@ bool wxListCtrl::SetColumnsOrder(const wxArrayInt& orders)
     wxCHECK_MSG( orders.size() == (size_t)numCols, false,
                     wxT("wrong number of elements in column orders array") );
 
-    return ListView_SetColumnOrderArray(GetHwnd(), numCols, &orders[0]) != 0;
+    return ListView_SetColumnOrderArray(GetHwnd(), numCols, const_cast<int*>(&orders[0])) != 0;
 }
 
 
@@ -1987,6 +1987,16 @@ wxListCtrl::HitTest(const wxPoint& point, int& flags, long *ptrSubItem) const
     LV_HITTESTINFO hitTestInfo;
     hitTestInfo.pt.x = (int) point.x;
     hitTestInfo.pt.y = (int) point.y;
+
+    // Firstly, check if the point is even on the list control itself since
+    // ListView_(Sub)ItemHitTest returns the topmost visible item when the
+    // point is over the column header control.
+    if ( ::ChildWindowFromPointEx(GetHwnd(), hitTestInfo.pt, CWP_SKIPINVISIBLE)
+           != GetHwnd() )
+    {
+        flags = wxLIST_HITTEST_NOWHERE;
+        return wxNOT_FOUND;
+    }
 
     long item;
 #ifdef LVM_SUBITEMHITTEST
@@ -3741,20 +3751,6 @@ wxListCtrl::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam)
             // we should bypass our own WM_PRINT handling as we don't handle
             // PRF_CHILDREN flag, so leave it to the native control itself
             return MSWDefWindowProc(nMsg, wParam, lParam);
-
-        case WM_NCPAINT:
-            // In dark mode the corner between the 2 scrollbars is not drawn in
-            // the correct colour by default, so paint it over if necessary.
-            if ( wxMSWDarkMode::IsActive() )
-            {
-                // Let the control paint itself first.
-                auto const rc =
-                    wxListCtrlBase::MSWWindowProc(nMsg, wParam, lParam);
-
-                wxMSWImpl::PaintScrollBarCorner(GetHwnd());
-                return rc;
-            }
-            break;
 
         case WM_CONTEXTMENU:
             // because this message is propagated upwards the child-parent
