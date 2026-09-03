@@ -2,8 +2,8 @@
 
 The plan is to send step 1 of the series on its own and see what comes back,
 rather than to open eighteen pull requests at once. What follows is the text
-should therefore be said by us rather than found by them.
-should therefore be said by us rather than found by them.
+for it and, first, the thing about it a reviewer will notice and that should
+therefore be said by us rather than found by them.
 
 ## Step 1 is not a set of cross-platform fixes
 
