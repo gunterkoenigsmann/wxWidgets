@@ -45,7 +45,7 @@ later group than the code calling it:
 
 import subprocess, collections, sys, os
 
-MB  = "1e8311d98f80a045f9e22fac7415c7e89356d0e7"
+MB  = "0820518c97a13d0905a6e8af16b203d307586107"
 TIP = "gtk4-project/claude/gtk4-wxwidgets-port-plan-pwo52u"
 
 def gtk(p, *names):

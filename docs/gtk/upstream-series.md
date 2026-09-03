@@ -25,7 +25,7 @@ That alone takes the submission from 49k lines to 31k.
 
 | step | branch | files | + | − | what it is |
 |---|---|---:|---:|---:|---|
-| 1 | `01-shared` | 46 | 967 | 85 | the changes outside the GTK backend |
+| 1 | `01-shared` | 43 | 933 | 60 | the changes outside the GTK backend |
 | 2 | `02-private` | 21 | 1865 | 11 | private headers and the GTK+ 3 compatibility shim |
 | 3 | `03-core` | 8 | 4216 | 301 | wxWindow, the event loop and the wxPizza container |
 | 4 | `04-toplevel` | 9 | 1575 | 105 | top level windows, frames, dialogs and popups |
@@ -40,12 +40,11 @@ That alone takes the submission from 49k lines to 31k.
 | 13 | `13-taskbar` | 3 | 1227 | 43 | the taskbar icon and the status notifier |
 | 14 | `14-webview` | 4 | 580 | 77 | wxWebView on WebKitGTK 6 |
 | 15 | `15-rest` | 5 | 97 | 8 | the last of the backend |
-| 16 | `16-tests` | 37 | 2572 | 146 | tests and samples |
-| 17 | `17-build` | 33 | 4085 | 53 | the build system, the configure switch and CI |
+| 16 | `16-tests` | 35 | 2492 | 130 | tests and samples |
+| 17 | `17-build` | 34 | 4164 | 53 | the build system, the configure switch and CI |
 
-31,165 insertions across 260 files, counted from today's tip. The largest
-step is 4,216 lines and the median is 1,575, which is the size the request
-asked for.
+31,130 insertions across 256 files. The largest step is 4,216 lines and the
+median is 1,575, which is the size the request asked for.
 
 ## Why this order
 
@@ -79,34 +78,15 @@ half -- "rewrite Git history in case there were any later corrections that it
 would make sense to fold in earlier commits" -- is answered by construction:
 there are no later corrections to fold in, because each file appears once.
 
-## What it is based on, and how far that has drifted
+## What it is based on
 
-The series starts at `1e8311d` (22 August), which is where this fork left
-upstream. Upstream master is **126 commits ahead** of that as of `0820518`
-(1 September), and the base is still an ancestor of it, so this rebases
-rather than needing a new branch.
+The series starts at `0820518` (1 September), which is upstream master. The
+port branch was merged with it first, so this applies to master as it stands
+rather than to where the fork left it in August. Eight files conflicted in
+that merge; the resolutions are in its commit message.
 
-Measured against that tip:
-
-| | |
-|---|---|
-| files changed on both sides since the base | 37 |
-| files that actually conflict on a test merge | **8** |
-
-```
-.github/workflows/ci_mac.yml   demos/life/life.cpp
-src/generic/caret.cpp          tests/controls/checkboxtest.cpp
-tests/controls/pickertest.cpp  tests/controls/textctrltest.cpp
-tests/controls/toolbooktest.cpp tests/menu/menu.cpp
-```
-
-Some of those are conflicts with our own work: `caret.cpp` and `life.cpp` are
-fixes upstream has already taken from this fork, so both sides carry a version
-of the same change and the resolution is to keep upstream's. That should be
-done before the series is offered, not while it is being reviewed, and the
-split regenerated from the rebased branch afterwards -- the script takes the
-final state of each file, so it costs one rerun and one rerun of the build
-check.
+Four files left `01-shared` in the rebasing: upstream has taken those fixes
+from this fork already, so they are no longer part of what is being offered.
 
 ## What was verified
 
@@ -117,6 +97,7 @@ check.
 | step 16 keeps it green | the whole port except the build system, GTK+ 3, clean configure: **rc=0** |
 | the series produces the port | step 17 under GTK4: builds, and the GUI suite passes **554 cases, 43,000 assertions** |
 | **every step in between builds too** | all 17 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors, 0 warnings** each |
+| the port still passes on the new base | GTK4 **917 cases**, GTK+ 3 **902 cases**, both all passing; pristine upstream master as a control: **878**, all passing |
 
 That last row replaces an argument that was wrong. It used to say steps 2 to 15
 did not need building because each is a subset of what step 16 contains and
