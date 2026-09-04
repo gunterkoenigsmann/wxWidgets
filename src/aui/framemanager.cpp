@@ -78,7 +78,6 @@ wxDEFINE_EVENT( wxEVT_AUI_FIND_MANAGER, wxAuiManagerEvent );
 static wxPoint gs_dragClientPos;
 static bool gs_hasDragClientPos = false;
 
-
 wxIMPLEMENT_DYNAMIC_CLASS(wxAuiManagerEvent, wxEvent);
 wxIMPLEMENT_CLASS(wxAuiManager, wxEvtHandler);
 
@@ -4257,7 +4256,6 @@ static wxPoint wxAuiGetDragClientPosition(wxWindow* frame)
     return frame->ScreenToClient(::wxGetMousePosition());
 }
 
-
 void wxAuiManager::OnFloatingPaneMoveStart(wxWindow* wnd)
 {
     // try to find the pane
@@ -4269,29 +4267,6 @@ void wxAuiManager::OnFloatingPaneMoveStart(wxWindow* wnd)
 
     if (m_flags & wxAUI_MGR_TRANSPARENT_DRAG)
         pane.frame->SetTransparent(150);
-}
-
-// Diagnostic logging for the Wayland docking failure, enabled by setting
-// WXAUI_DRAGLOG. It stays because the failure has only ever been seen on a
-// machine none of the development happens on, so the alternative to reading
-// what that machine computes is guessing at it, which has a poor record.
-//
-// Remove this along with the rest of the fork-only changes; see #112.
-static bool wxAuiDragLogging()
-{
-    static const bool s_on = wxGetEnv("WXAUI_DRAGLOG", nullptr);
-    return s_on;
-}
-
-static void wxAuiDragLog(const char* what, const wxPoint& screen,
-                         const wxPoint& client, const char* extra = "")
-{
-    if ( !wxAuiDragLogging() )
-        return;
-
-    fprintf(stderr, "AUIDRAG %-18s screen=(%d,%d) client=(%d,%d) %s\n",
-            what, screen.x, screen.y, client.x, client.y, extra);
-    fflush(stderr);
 }
 
 void wxAuiManager::OnFloatingPaneMoving(wxWindow* wnd, wxDirection dir)
@@ -4342,7 +4317,6 @@ void wxAuiManager::OnFloatingPaneMoving(wxWindow* wnd, wxDirection dir)
 #endif
 
     wxPoint client_pt = wxAuiGetDragClientPosition(m_frame);
-    wxAuiDragLog("moving", pt, client_pt);
 
     // calculate the offset from the upper left-hand corner
     // of the frame to the mouse pointer
@@ -4446,7 +4420,6 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
 #endif
 
     wxPoint client_pt = wxAuiGetDragClientPosition(m_frame);
-    wxAuiDragLog("dropped", pt, client_pt);
 
     // calculate the offset from the upper left-hand corner
     // of the frame to the mouse pointer
@@ -4459,21 +4432,6 @@ void wxAuiManager::OnFloatingPaneMoved(wxWindow* wnd, wxDirection dir)
     {
         // do the drop calculation
         DoDrop(m_docks, m_panes, pane, client_pt, action_offset);
-
-        if ( wxAuiDragLogging() )
-        {
-            fprintf(stderr, "AUIDRAG drop-result     floating=%d docked=%d "
-                            "direction=%d frame_pos=(%d,%d) "
-                            "action_offset=(%d,%d) cli_size=%dx%d "
-                            "pane_rect=%d,%d %dx%d\n",
-                    pane.IsFloating() ? 1 : 0, pane.IsDocked() ? 1 : 0,
-                    pane.dock_direction, frame_pos.x, frame_pos.y,
-                    action_offset.x, action_offset.y,
-                    m_frame->GetClientSize().x, m_frame->GetClientSize().y,
-                    pane.rect.x, pane.rect.y,
-                    pane.rect.width, pane.rect.height);
-            fflush(stderr);
-        }
     }
 
     // if the pane is still floating, update its floating

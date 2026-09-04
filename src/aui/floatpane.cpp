@@ -209,14 +209,6 @@ void wxAuiFloatingFrame::OnClose(wxCloseEvent& evt)
     }
 }
 
-// Diagnostic logging shared with framemanager.cpp, enabled by WXAUI_DRAGLOG.
-// Remove with the rest of the fork-only changes; see #112.
-static bool wxAuiFloatLogging()
-{
-    static const bool s_on = wxGetEnv("WXAUI_DRAGLOG", nullptr);
-    return s_on;
-}
-
 void wxAuiFloatingFrame::OnMoveEvent(wxMoveEvent& event)
 {
     // Always sync pane's floating_pos with frame's position
@@ -242,29 +234,12 @@ void wxAuiFloatingFrame::OnMoveEvent(wxMoveEvent& event)
 
     wxRect winRect = GetRect();
 
-    if ( wxAuiFloatLogging() )
-    {
-        fprintf(stderr, "AUIFLOAT move type=%s rect=%d,%d %dx%d "
-                        "last=%d,%d %dx%d moving=%d\n",
-                event.GetEventType() == wxEVT_MOVING ? "MOVING" : "MOVE",
-                winRect.x, winRect.y, winRect.width, winRect.height,
-                m_lastRect.x, m_lastRect.y,
-                m_lastRect.width, m_lastRect.height, m_moving ? 1 : 0);
-        fflush(stderr);
-    }
-
     if (winRect == m_lastRect)
-    {
-        if ( wxAuiFloatLogging() )
-            fprintf(stderr, "AUIFLOAT   bail: rect unchanged\n");
         return;
-    }
 
     // skip the first move event
     if (m_lastRect.IsEmpty())
     {
-        if ( wxAuiFloatLogging() )
-            fprintf(stderr, "AUIFLOAT   bail: first event\n");
         m_lastRect = winRect;
         return;
     }
@@ -329,11 +304,7 @@ void wxAuiFloatingFrame::OnMoveEvent(wxMoveEvent& event)
     }
 
     if (m_last3Rect.IsEmpty())
-    {
-        if ( wxAuiFloatLogging() )
-            fprintf(stderr, "AUIFLOAT   bail: last3Rect empty\n");
         return;
-    }
 
     if ( event.GetEventType() == wxEVT_MOVING )
         OnMoving(event.GetRect(), dir);
@@ -347,8 +318,6 @@ void wxAuiFloatingFrame::OnIdle(wxIdleEvent& event)
     {
         if (!isMouseDown())
         {
-            if ( wxAuiFloatLogging() )
-                fprintf(stderr, "AUIFLOAT idle: button released, finishing\n");
             m_moving = false;
             OnMoveFinished();
         }
