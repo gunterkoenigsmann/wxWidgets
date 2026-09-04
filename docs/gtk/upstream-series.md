@@ -50,7 +50,7 @@ job before the port lands is a question for them, and it is #106's.
 
 | step | branch | files | + | − | what it is |
 |---|---|---:|---:|---:|---|
-| 1 | `01-shared` | 43 | 933 | 60 | the changes outside the GTK backend |
+| 1 | `01-shared` | 33 | 542 | 36 | the changes outside the GTK backend, as 29 commits |
 | 2 | `02-private` | 21 | 1865 | 11 | private headers and the GTK+ 3 compatibility shim |
 | 3 | `03-core` | 8 | 4216 | 301 | wxWindow, the event loop and the wxPizza container |
 | 4 | `04-toplevel` | 9 | 1575 | 105 | top level windows, frames, dialogs and popups |
@@ -95,6 +95,51 @@ version of this script was found to be wrong -- `Makefile.in` referred to
 Between those two, the order is dependency order: the private headers and the
 compatibility shim, then the window and event plumbing everything else calls
 into, then the subsystems.
+
+## Step 1 is a series of commits, not one
+
+Vadim asked for it after seeing the first pull request:
+
+> a single PR doesn't have to consist of a single commit. The different
+> changes here seem to be completely unrelated, so can you please ask the
+> agent to split them in separate commits with the commit messages explaining
+> *why* is the change being made (*not* what is being changed)?
+
+He is right about what step 1 is: the rule that builds it is "everything
+outside `src/gtk`", so what it collects have nothing in common beyond that.
+There are 29 reasons in it -- six fixes that have nothing to do with GTK 4 at
+all, twenty changes that are conditional on it, and three that only document
+what the toolkit cannot do -- and it is now 29 commits, each one reason, each
+message saying why rather than what.
+
+That branch is therefore written by hand and not by the generator. The
+generator still cuts the same content into a scratch branch and compares:
+if the hand-written branch and the cut have drifted apart it stops and says
+so, rather than silently replacing one with the other.
+
+The same treatment is not planned for the other steps. Each of those is one
+subsystem being moved to one new API, so the "why" is the same sentence for
+every hunk in it, and splitting would produce commits that differ only in
+which file they touch.
+
+## What is checked before a step is committed
+
+Two greps over the lines each step *adds*, because a cut is not read line by
+line before it is pushed:
+
+* anything that is fork-only scaffolding -- a leftover `Fork only, not for
+  upstream` marker, or the AUI drag logging's `WXAUI_DRAGLOG` switch -- stops
+  the cut;
+* an issue reference of the form `see #123` is reported but does not stop it,
+  because in upstream's tree that number points at an unrelated upstream
+  issue and has to be rewritten by hand into whatever it was saying.
+
+This exists because the first pull request went out carrying the
+`WXAUI_DRAGLOG` logging and a comment saying to remove it "with the rest of
+the fork-only changes". Nothing between writing that cut and pushing it
+looked, so nothing found it. There are still `see #NNN` references in later
+steps; they are the warning's list and have to go before those steps are
+sent.
 
 ## What each step is, and is not
 

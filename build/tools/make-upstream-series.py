@@ -44,6 +44,7 @@ later group than the code calling it:
 """
 
 import subprocess, collections, sys, os
+import re
 
 # What the CI jobs run, kept with them so the step can be dropped whole.
 CI_RUNS = (
@@ -62,6 +63,16 @@ FORK_ONLY_FILES = (
     "build/tools/build-upstream-series.sh",
     "build/tools/check-commit-trailers.py",
 )
+
+# Steps whose branch is written by hand rather than cut by this script.
+#
+# Upstream asked for step 1 to be a series of commits, one per reason, because
+# what it collects really is unrelated changes that happen to share the
+# property of being outside src/gtk. A generated branch cannot say why each
+# change was made, so that one is maintained as a branch of its own; the cut
+# still regenerates its content and refuses to go on if the two have drifted
+# apart.
+HAND_SPLIT = ("01-shared",)
 
 MB  = "0820518c97a13d0905a6e8af16b203d307586107"
 TIP = "gtk4-project/claude/gtk4-wxwidgets-port-plan-pwo52u"
@@ -199,6 +210,56 @@ def strip_fork_only(path):
     return True
 
 
+# Things that mean something in this fork and nothing, or something wrong, in
+# upstream's tree.
+#
+# This exists because a cut is not reviewed line by line before it is sent: the
+# first PR went out carrying the WXAUI_DRAGLOG logging and its "see #112", and
+# nothing between writing it and pushing it looked. A grep does look, every
+# time.
+#
+# The first list stops the cut, as those can only be fork-only leftovers. The
+# second only reports, because an issue number has to be rewritten by hand into
+# what it was saying -- upstream cannot follow a link into this fork -- and
+# that is a job for whoever prepares the step, not for the cut.
+FATAL_TRACES = (
+    re.compile(r"Fork only, not for upstream"),
+    re.compile(r"End fork only\."),
+    re.compile(r"WXAUI_DRAGLOG"),
+)
+WARN_TRACES = (
+    re.compile(r"\b(?:see|issue)\s+#[0-9]+", re.I),
+)
+
+def check_no_fork_traces(paths, step):
+    """Look for fork-only references in what this step adds.
+
+    Only lines the series actually changes are looked at, so a reference
+    upstream itself wrote stays upstream's business.
+    """
+    fatal, warn = [], []
+    for p in paths:
+        if not os.path.exists(p) or p in FORK_ONLY_FILES:
+            continue
+        diff = subprocess.run(["git", "diff", "-U0", MB, "--", p],
+                              capture_output=True, text=True).stdout
+        for line in diff.split("\n"):
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
+            where = "%s: %s" % (p, line[1:].strip())
+            if any(rx.search(line) for rx in FATAL_TRACES):
+                fatal.append(where)
+            elif any(rx.search(line) for rx in WARN_TRACES):
+                warn.append(where)
+    for w in warn:
+        print("   WARNUNG: Fork-Issue-Referenz in %s:" % step, w)
+    if fatal:
+        print("FEHLER: Fork-only-Spuren in", step)
+        for b in fatal:
+            print("   ", b)
+        sys.exit(1)
+
+
 def run(*args, **kw):
     r = subprocess.run(args, capture_output=True, text=True, **kw)
     if r.returncode:
@@ -211,8 +272,13 @@ for name, desc, _ in RULES:
     if not paths:
         print("übersprungen (leer):", name); continue
     branch = "upstream-series/" + name
-    run("git","branch","-D",branch) if branch in run("git","branch","--list",branch) else None
-    run("git","checkout","-q","-b",branch,prev)
+    handSplit = name in HAND_SPLIT
+    # For a hand-split step the content is still cut here, but into a scratch
+    # branch, and only to compare it against the branch that is kept by hand.
+    target = branch + ".regen" if handSplit else branch
+    if target in run("git","branch","--list",target):
+        run("git","branch","-D",target)
+    run("git","checkout","-q","-b",target,prev)
     # take this group's final state from the port branch
     for i in range(0, len(paths), 60):
         run("git","checkout",TIP,"--",*paths[i:i+60])
@@ -224,13 +290,25 @@ for name, desc, _ in RULES:
         # 17-build.
         if p.startswith(".github/") and os.path.exists(p):
             strip_fork_only(p)
+    check_no_fork_traces(paths, name)
     msg = ("%s\n\n"
-           "One step of the GTK4 port, split for review as upstream asked (#175).\n"
+           "One step of the GTK4 port, split for review as upstream asked.\n"
            "The series is cumulative: this applies on top of %s and the whole\n"
            "port is the last step of it.\n\n"
            "Co-authored-by: Claude Opus 5 <noreply@anthropic.com>\n") % (desc, prev if prev==MB else "the previous step")
     run("git","commit","-q","-a","-m",msg)
-    head = run("git","rev-parse","--short","HEAD").strip()
-    print("%-30s %s  %3d Dateien" % (branch, head, len(paths)))
+    if handSplit:
+        cut  = run("git","rev-parse",target+"^{tree}").strip()
+        kept = run("git","rev-parse",branch+"^{tree}").strip()
+        if cut != kept:
+            print("FEHLER: %s ist von Hand geschrieben und weicht ab:"
+                  % branch)
+            print(run("git","diff","--stat",branch,target))
+            sys.exit(1)
+        run("git","checkout","-q",branch)
+        run("git","branch","-D",target)
+    head = run("git","rev-parse","--short",branch).strip()
+    print("%-30s %s  %3d Dateien%s"
+          % (branch, head, len(paths), "  (von Hand)" if handSplit else ""))
     prev = branch
 print("TIP:", prev)
