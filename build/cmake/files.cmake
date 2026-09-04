@@ -1427,6 +1427,8 @@ set(GTK_SRC
     src/gtk/srchctrl.cpp
     src/generic/imaglist.cpp
     src/gtk/statusnotifier.cpp
+    src/generic/filedlgg.cpp
+    src/generic/dirdlgg.cpp
 )
 
 set(GTK2_SRC
@@ -1498,6 +1500,8 @@ set(GTK_HDR
     wx/gtk/hyperlink.h
     wx/gtk/srchctrl.h
     wx/generic/imaglist.h
+    wx/generic/filedlgg.h
+    wx/generic/dirdlgg.h
 )
 
 set(GTK2_HDR

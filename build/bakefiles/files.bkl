@@ -1543,6 +1543,8 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     src/gtk/srchctrl.cpp
     src/generic/imaglist.cpp
     src/gtk/statusnotifier.cpp
+    src/generic/dirdlgg.cpp
+    src/generic/filedlgg.cpp
 </set>
 <set var="GTK2_SRC" hints="files">
     $(GTK_SRC)
@@ -1612,6 +1614,8 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     wx/gtk/dvrenderer.h
     wx/gtk/srchctrl.h
     wx/generic/imaglist.h
+    wx/generic/filedlgg.h
+    wx/generic/dirdlgg.h
 </set>
 <set var="GTK2_HDR" hints="files">
     $(GTK_HDR)
