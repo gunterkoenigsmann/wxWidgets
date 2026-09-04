@@ -28,7 +28,7 @@ enum
     QUEUE_DRAW,     /* ask for a repaint                                    */
     QUEUE_RESIZE,   /* ask for a measure and an allocation                  */
     FROM_STRING,    /* reload through the 4.12 entry point instead          */
-    READD,          /* take the provider off the display and put it back    */
+    REATTACH,       /* take the provider off the display and put it back    */
     NEW_PROVIDER,   /* retire the provider and add a fresh one              */
     MARKER_CLASS,   /* add a CSS class the theme does not use               */
     AFTER_SHOW,     /* load the rules again once the window is on screen    */
@@ -125,7 +125,7 @@ int main(void)
             gtk_widget_queue_resize(label[i]);
             break;
 
-        case READD:
+        case REATTACH:
             gtk_style_context_remove_provider_for_display(
                 display, GTK_STYLE_PROVIDER(prov[i]));
             gtk_style_context_add_provider_for_display(
