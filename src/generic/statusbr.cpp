@@ -25,7 +25,6 @@
 
 #ifdef __WXGTK__
     #include "wx/gtk/private.h"
-    #include "wx/gtk/private/gtk3-compat.h"
 #endif
 
 // we only have to do it here when we use wxStatusBarGeneric in addition to the
