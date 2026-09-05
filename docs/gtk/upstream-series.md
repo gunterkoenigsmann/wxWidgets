@@ -42,7 +42,8 @@ gratuitous reformatting in the patch. The check #112 asks for is that
 finds nothing.
 
 What is *not* stripped, because it is a real contribution rather than local
-scaffolding: the GTK4 build job in `ci.yml`, the GTK4 invariants step, and
+scaffolding: the GTK4 build job in `ci.yml`, the installed-header check added
+to `ci_cmake.yml`, the GTK4 invariants step, and
 `check-gtk-min-versions` in `code_checks.yml`. Whether upstream wants a GTK4
 job before the port lands is a question for them, and it is #106's.
 

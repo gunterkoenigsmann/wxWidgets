@@ -53,6 +53,7 @@ CI_RUNS = (
     "build/tools/gtk4-invariants.c",
     "misc/scripts/check_configure.sh",
     "misc/scripts/check_files_lists.sh",
+    "misc/scripts/check_installed_headers.sh",
 )
 
 # This fork's own tooling, which has no meaning in upstream's tree: the two

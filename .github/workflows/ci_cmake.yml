@@ -252,6 +252,18 @@ jobs:
                 cmake --build . --target install
             fi
 
+      # Only on Linux: the check asks the installed wx-config for its flags,
+      # and the Windows rows have no wx-config while the iOS one installs a
+      # cross-built tree that this runner cannot compile against. The two
+      # Linux rows are enough to catch a header that no port installs.
+      - name: Checking the installed headers
+        if: runner.os == 'Linux'
+        run: |
+          # A header missing from the installed tree still compiles in the
+          # build tree, so only an application notices -- which is how
+          # wx/generic/dirdlgg.h reached one. See the script for the rest.
+          ./misc/scripts/check_installed_headers.sh
+
       - name: Setup Go
         if: matrix.cmake_tests != 'OFF'
         uses: actions/setup-go@v6
