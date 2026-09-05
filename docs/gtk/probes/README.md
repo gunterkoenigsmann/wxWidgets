@@ -394,16 +394,18 @@ installation and a day spent reading wx is a day wasted.
 `nm | grep` for a function name only works if the function survives to have a
 name. A `static` helper does not: at `-O2` it is inlined into its callers and
 no symbol is emitted, so `nm` finds nothing whether the fix is present or not.
-Measured on `wxAuiGetDragClientPosition()` -- symbol present at `-O0`, absent
-at `-O2`, same source both times.
+Measured on a `static` helper in `src/aui/framemanager.cpp` -- symbol present
+at `-O0`, absent at `-O2`, same source both times. (That helper is gone now:
+upstream implemented the Wayland drag properly, see wxWidgets/wxWidgets#26969.
+The lesson it taught is what is kept here.)
 
 Check the source and the build's freshness instead, which does not care how
 the compiler chose to emit anything:
 
 ```sh
 git log --oneline -1
-grep -c wxAuiGetDragClientPosition ../src/aui/framemanager.cpp
-find . -name '*framemanager.o' -newer ../src/aui/framemanager.cpp
+grep -c <something the fix adds> ../src/<the file it changed>
+find . -name '*<file>.o' -newer ../src/<the file it changed>
 ```
 
 ## `sway-up.sh` — a compositor that is actually there
