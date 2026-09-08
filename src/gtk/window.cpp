@@ -7451,19 +7451,24 @@ bool wxWindowGTK::Reparent( wxWindowBase *newParentBase )
     // Notice that old m_parent pointer might be non-null here but the widget
     // still not have any parent at GTK level if it's a notebook page that had
     // been removed from the notebook so test this at GTK level and not wx one.
+#ifdef __WXGTK4__
+    if ( gtk_widget_get_parent(m_widget) )
+    {
+        // GTKDetachFromParent() finds the parent again itself, so there is
+        // nothing to name here.
+        GTKDetachFromParent();
+    }
+#else
     if ( GtkWidget* const parentGTK = gtk_widget_get_parent(m_widget) )
     {
-#ifdef __WXGTK4__
-        GTKDetachFromParent();
-#else
         // Not gtk_widget_unparent(): that detaches the widget but leaves it in
         // the container's own list of children, which the container then walks
         // when it is destroyed -- by which time the widget is gone. Only the
         // container's "remove" knows how to take it off that list, and under
         // GTK4 that is what GTKDetachFromParent() is for.
         gtk_container_remove(GTK_CONTAINER(parentGTK), m_widget);
-#endif
     }
+#endif // __WXGTK4__/!__WXGTK4__
 
     wxASSERT( GTK_IS_WIDGET(m_widget) );
 
