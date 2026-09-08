@@ -68,6 +68,9 @@ private:
     // we're attached to a frame and destroyed when we're detached from it.
     GMenu* m_barModel;
     GtkEventController* m_shortcuts;
+
+    // Removes m_shortcuts from the given widget, which owns it.
+    void GTKRemoveShortcuts(GtkWidget* target);
 #endif // __WXGTK4__
 
     wxDECLARE_DYNAMIC_CLASS(wxMenuBar);

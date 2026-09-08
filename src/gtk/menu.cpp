@@ -415,17 +415,20 @@ void wxMenuBar::GTKRebuildModel()
     if ( !target )
         return;
 
-    if ( m_shortcuts )
-    {
-        gtk_widget_remove_controller(target, m_shortcuts);
-        m_shortcuts = nullptr;
-    }
+    GTKRemoveShortcuts(target);
 
 #if wxUSE_ACCEL
     m_shortcuts = gtk_shortcut_controller_new();
     gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(m_shortcuts),
                                       GTK_SHORTCUT_SCOPE_GLOBAL);
     gtk_widget_add_controller(target, m_shortcuts);
+
+    // The widget owns the controller now, so this pointer has to stop
+    // pointing at it if the widget takes it down first: removing a
+    // controller that has already been destroyed is what GTK reports as
+    // "assertion 'GTK_IS_EVENT_CONTROLLER (controller)' failed".
+    g_object_add_weak_pointer(G_OBJECT(m_shortcuts),
+                              reinterpret_cast<gpointer*>(&m_shortcuts));
 
     for ( wxMenuList::compatibility_iterator node = m_menus.GetFirst();
           node;
@@ -649,15 +652,29 @@ void wxMenuBar::Attach(wxFrame *frame)
     SetLayoutDirection(wxLayout_Default);
 }
 
+// Take the shortcut controller off the widget that has it, if any. Does
+// nothing once the widget has been destroyed, as it took the controller with
+// it and m_shortcuts is null again by then.
+void wxMenuBar::GTKRemoveShortcuts(GtkWidget* target)
+{
+    if ( !m_shortcuts )
+        return;
+
+    GtkEventController* const shortcuts = m_shortcuts;
+
+    // Stop watching before removing: removing is what destroys it.
+    g_object_remove_weak_pointer(G_OBJECT(shortcuts),
+                                 reinterpret_cast<gpointer*>(&m_shortcuts));
+    m_shortcuts = nullptr;
+
+    gtk_widget_remove_controller(target, shortcuts);
+}
+
 void wxMenuBar::Detach()
 {
     if ( GtkWidget* const target = GetActionTarget(m_menuBarFrame) )
     {
-        if ( m_shortcuts )
-        {
-            gtk_widget_remove_controller(target, m_shortcuts);
-            m_shortcuts = nullptr;
-        }
+        GTKRemoveShortcuts(target);
 
         for ( wxMenuList::compatibility_iterator node = m_menus.GetFirst();
               node;

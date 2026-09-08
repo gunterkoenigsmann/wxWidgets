@@ -1233,9 +1233,18 @@ public:
 
         if ( m_gesture )
         {
+            GtkGesture* const gesture = m_gesture;
+
+            // Stop watching before removing, as removing destroys it.
+            g_object_remove_weak_pointer(
+                G_OBJECT(gesture), reinterpret_cast<gpointer*>(&m_gesture));
+            m_gesture = nullptr;
+
             gtk_widget_remove_controller(m_widget,
-                                         GTK_EVENT_CONTROLLER(m_gesture));
+                                         GTK_EVENT_CONTROLLER(gesture));
         }
+        //else: the widget was destroyed first and took the gesture with it,
+        // which is what the weak pointer above is here to tell us.
         gtk_widget_insert_action_group(m_widget, "spelling", nullptr);
         g_object_unref(m_actions);
 
@@ -1354,6 +1363,11 @@ private:
                              G_CALLBACK(SecondaryPressed), this);
             gtk_widget_add_controller(m_widget,
                                       GTK_EVENT_CONTROLLER(m_gesture));
+
+            // The widget owns the gesture now, so this pointer must stop
+            // pointing at it if the widget takes it down first.
+            g_object_add_weak_pointer(
+                G_OBJECT(m_gesture), reinterpret_cast<gpointer*>(&m_gesture));
         }
         //else: there is no such thing for a GtkEntry. GTK4 removed
         // gtk_entry_get_layout(), the entry's text being laid out by an
