@@ -521,6 +521,14 @@ public:
     GtkGesture* m_zoom_gesture;
     GtkGesture* m_rotate_gesture;
     GtkGesture* m_long_press_gesture;
+
+#ifdef __WXGTK4__
+    // The widget the gestures above were added to, or null if it has been
+    // destroyed since -- a weak pointer, so that Free() can tell the two
+    // apart. It needs the widget because under GTK4 removing a controller
+    // from it is what destroys the controller, see Free().
+    GtkWidget* m_gesturesWidget = nullptr;
+#endif // __WXGTK4__
 };
 
 using wxWindowGesturesMap = std::unordered_map<wxWindow*, wxWindowGesturesData*>;
@@ -5787,6 +5795,14 @@ void wxWindowGesturesData::Reinit(wxWindowGTK* win,
     m_lastScale = 1;
     m_lastAngleDelta = 0;
 
+#ifdef __WXGTK4__
+    // Watch the widget the gestures below are added to: Free() needs it, and
+    // has to know if it has gone in the meantime.
+    m_gesturesWidget = widget;
+    g_object_add_weak_pointer(G_OBJECT(widget),
+                              reinterpret_cast<gpointer*>(&m_gesturesWidget));
+#endif // __WXGTK4__
+
     if ( eventsMask & wxTOUCH_VERTICAL_PAN_GESTURE )
     {
         eventsMask &= ~wxTOUCH_VERTICAL_PAN_GESTURE;
@@ -5960,11 +5976,49 @@ void wxWindowGesturesData::Reinit(wxWindowGTK* win,
 
 void wxWindowGesturesData::Free()
 {
+#ifdef __WXGTK4__
+    // gtk_widget_add_controller() takes ownership of the controller, so wx
+    // holds no reference to drop and unreffing here would free a gesture the
+    // widget still lists. Removing it from the widget is what destroys it.
+    GtkGesture** const gestures[] =
+    {
+        &m_vertical_pan_gesture,
+        &m_horizontal_pan_gesture,
+        &m_zoom_gesture,
+        &m_rotate_gesture,
+        &m_long_press_gesture,
+    };
+
+    for ( GtkGesture** gesture : gestures )
+    {
+        if ( *gesture == nullptr )
+            continue;
+
+        // A null widget means it was destroyed first and took its controllers
+        // with it, so there is nothing left to remove them from.
+        if ( m_gesturesWidget != nullptr )
+        {
+            gtk_widget_remove_controller(m_gesturesWidget,
+                                         GTK_EVENT_CONTROLLER(*gesture));
+        }
+
+        *gesture = nullptr;
+    }
+
+    if ( m_gesturesWidget != nullptr )
+    {
+        g_object_remove_weak_pointer(
+            G_OBJECT(m_gesturesWidget),
+            reinterpret_cast<gpointer*>(&m_gesturesWidget));
+        m_gesturesWidget = nullptr;
+    }
+#else // !__WXGTK4__
     g_clear_object(&m_vertical_pan_gesture);
     g_clear_object(&m_horizontal_pan_gesture);
     g_clear_object(&m_zoom_gesture);
     g_clear_object(&m_rotate_gesture);
     g_clear_object(&m_long_press_gesture);
+#endif // __WXGTK4__/!__WXGTK4__
     m_rawTouchEvents = false;
 
     // We don't current remove GDK_TOUCHPAD_GESTURE_MASK as this can't be done
