@@ -117,10 +117,15 @@ wx_gtk_choice_key_pressed(GtkEventControllerKey* WXUNUSED(controller),
     return choice->GTKMoveSelection(keyval);
 }
 
-// GtkDropDown builds each row with a factory. The default one makes a plain
-// GtkLabel, and a plain GtkLabel does not ellipsize -- which the cell renderer
-// GtkComboBoxText used did, for the reason given in Create() below. So build
-// the label here instead of taking the default.
+// The rows of the popup list. The default factory would do, except for the
+// alignment: GTK centres its label and a combo box list is left aligned.
+//
+// Ellipsizing, as the cell renderer of the GtkComboBoxText this replaces was,
+// so that a long item cannot make the popup wider than the control. What an
+// ellipsizing GtkLabel asks for as its minimum is the width of one ellipsis,
+// which is why the popover is given a width of its own in
+// wx_gtk_choice_popover_show(): without that the list has nothing else to take
+// its width from and every row is reduced to "...".
 static void
 wx_gtk_dropdown_setup_label(GtkSignalListItemFactory*, GtkListItem* item, gpointer)
 {
@@ -141,12 +146,25 @@ wx_gtk_dropdown_bind_label(GtkSignalListItemFactory*, GtkListItem* item, gpointe
                         obj ? gtk_string_object_get_string(obj) : "");
 }
 
+// Give the popover the width of the button it drops from, which is what a
+// GtkComboBox did for its own popup and what this replaces.
+//
+// It is also what stops the list collapsing: its rows ellipsize, so their
+// minimum width is one ellipsis, and the popover takes the minimum.
+static void
+wx_gtk_choice_popover_show(GtkWidget* popover, GtkWidget* button)
+{
+    GtkWidget* const scrolled = gtk_popover_get_child(GTK_POPOVER(popover));
+    if ( !scrolled )
+        return;
+
+    gtk_widget_set_size_request(scrolled, gtk_widget_get_width(button), -1);
+}
+
 } // extern "C"
 
-// A factory building one ellipsizing label per item. GTK4's default builds a
-// plain GtkLabel, and a plain GtkLabel does not ellipsize -- which the cell
-// renderer this replaces did, deliberately; see Create() below.
-static GtkListItemFactory* wxGTKCreateEllipsizingLabelFactory()
+// A factory building one left aligned, ellipsizing label per item.
+static GtkListItemFactory* wxGTKCreateListLabelFactory()
 {
     GtkListItemFactory* const factory = gtk_signal_list_item_factory_new();
     g_signal_connect(factory, "setup",
@@ -404,7 +422,7 @@ GtkWidget* wxChoice::GTKCreateItemPopover()
     gtk_single_selection_set_selected(selection, GTK_INVALID_LIST_POSITION);
     m_listSelection = selection;
 
-    GtkListItemFactory* const factory = wxGTKCreateEllipsizingLabelFactory();
+    GtkListItemFactory* const factory = wxGTKCreateListLabelFactory();
     m_listView = gtk_list_view_new(GTK_SELECTION_MODEL(selection), factory);
     gtk_list_view_set_single_click_activate(GTK_LIST_VIEW(m_listView), TRUE);
 
@@ -415,12 +433,16 @@ GtkWidget* wxChoice::GTKCreateItemPopover()
         GTK_SCROLLED_WINDOW(scrolled), TRUE);
     gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scrolled),
                                                400);
+
     gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), m_listView);
 
     GtkWidget* const popover = gtk_popover_new();
     gtk_popover_set_child(GTK_POPOVER(popover), scrolled);
     gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
     gtk_widget_set_halign(popover, GTK_ALIGN_START);
+
+    g_signal_connect(popover, "show",
+                     G_CALLBACK(wx_gtk_choice_popover_show), m_dropButton);
 
     return popover;
 }
