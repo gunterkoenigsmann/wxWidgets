@@ -5398,6 +5398,11 @@ void wxAuiManager::OnLeftUp(wxMouseEvent& event)
 
     m_action = actionNone;
     m_lastMouseMove = wxPoint(); // see comment in OnMotion()
+
+    // The branches above each release the capture for the action they end, so
+    // this is only for an action that was cancelled while it was still held.
+    if (wxWindow::GetCapture() == m_frame)
+        m_frame->ReleaseMouse();
 }
 
 
