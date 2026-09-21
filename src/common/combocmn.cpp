@@ -1668,18 +1668,15 @@ void wxComboCtrlBase::OnTextCtrlEvent(wxCommandEvent& event)
     wxCommandEvent evt2(event);
     evt2.SetId(GetId());
     evt2.SetEventObject(this);
-    const bool handled = HandleWindowEvent(evt2);
 
-    // The re-sent event is the one that propagates, so stop this one either
-    // way: letting both travel would deliver two to every parent.
+    // Stop propagating the original event in any case, parent window will get
+    // evt2 and we don't want to send both to it.
     event.StopPropagation();
 
-    // Say so when nobody handled the re-sent event, so that the text
-    // control's own handling of this one carries on. For Enter that is what
-    // activates the dialog's default button: wxTextCtrl::OnChar() only calls
-    // ClickDefaultButtonIfPossible() if its wxEVT_TEXT_ENTER came back
-    // unhandled, and this handler is inside that call.
-    if ( !handled )
+    // But still allow the original event to be processed by this control
+    // itself if the application didn't handle it, e.g. to allow using "Enter"
+    // to close the dialog containing this control.
+    if ( !HandleWindowEvent(evt2) )
         event.Skip();
 }
 

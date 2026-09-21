@@ -26,6 +26,12 @@
 #include "wx/dataobj.h"
 #include "wx/panel.h"
 
+#if defined(__WXMSW__) && wxUSE_PRINTING_ARCHITECTURE
+    #include "wx/msw/wrapwin.h"
+    #include "wx/msw/private.h"
+    #include "wx/msw/printdlg.h"
+#endif
+
 #include "asserthelper.h"
 #include "waitfor.h"
 
@@ -174,6 +180,47 @@ TEST_CASE("GUI::ParseFileDialogFilter", "[guifuncs]")
     );
 }
 
+#if defined(__WXMSW__) && wxUSE_PRINTING_ARCHITECTURE
+
+TEST_CASE("wxPrintData::MSWDuplexDefault", "[print][msw]")
+{
+    wxWindowsPrintNativeData nativeData;
+    GlobalPtr hDevMode(sizeof(DEVMODE), GMEM_FIXED | GMEM_ZEROINIT);
+    REQUIRE( static_cast<HGLOBAL>(hDevMode) );
+
+    DEVMODE * const devMode =
+        static_cast<DEVMODE *>(static_cast<HGLOBAL>(hDevMode));
+    devMode->dmSize = sizeof(DEVMODE);
+    devMode->dmFields = DM_DUPLEX;
+    devMode->dmDuplex = DMDUP_VERTICAL;
+
+    // wxWindowsPrintNativeData takes ownership and frees the handle.
+    nativeData.SetDevMode(hDevMode.Release());
+
+    SECTION("Default")
+    {
+        wxPrintData data;
+
+        REQUIRE( nativeData.TransferFrom(data) );
+
+        CHECK( (devMode->dmFields & DM_DUPLEX) != 0 );
+        CHECK( devMode->dmDuplex == DMDUP_VERTICAL );
+    }
+
+    SECTION("ExplicitSimplex")
+    {
+        wxPrintData data;
+        data.SetDuplex(wxDUPLEX_SIMPLEX);
+
+        REQUIRE( nativeData.TransferFrom(data) );
+
+        CHECK( (devMode->dmFields & DM_DUPLEX) != 0 );
+        CHECK( devMode->dmDuplex == DMDUP_SIMPLEX );
+    }
+}
+
+#endif // defined(__WXMSW__) && wxUSE_PRINTING_ARCHITECTURE
+
 TEST_CASE("GUI::ClientToScreen", "[guifuncs]")
 {
     wxWindow* const tlw = wxTheApp->GetTopWindow();
@@ -193,10 +240,10 @@ TEST_CASE("GUI::ClientToScreen", "[guifuncs]")
     tlw->Update();
     wxYield();
 
-    std::unique_ptr<wxPanel> const
-        p1(new wxPanel(tlw, wxID_ANY, wxPoint(0, 0), wxSize(100, 50)));
-    std::unique_ptr<wxPanel> const
-        p2(new wxPanel(tlw, wxID_ANY, wxPoint(0, 50), wxSize(100, 50)));
+    auto const p1 = make_unique<wxPanel>(tlw, wxID_ANY, wxPoint(0, 0),
+                                         wxSize(100, 50));
+    auto const p2 = make_unique<wxPanel>(tlw, wxID_ANY, wxPoint(0, 50),
+                                         wxSize(100, 50));
     wxWindow* const
         b = new wxWindow(p2.get(), wxID_ANY, wxPoint(10, 10), wxSize(30, 10));
 
@@ -257,8 +304,8 @@ TEST_CASE("GUI::FindWindowAtPoint", "[guifuncs]")
     // assertion messages.
     parent->SetLabel("parent");
 
-    std::unique_ptr<wxWindow> btn1(new TestButton(parent, "1", wxPoint(10, 10)));
-    std::unique_ptr<wxWindow> btn2(new TestButton(parent, "2", wxPoint(10, 90)));
+    auto btn1 = make_unique<TestButton>(parent, "1", wxPoint(10, 10));
+    auto btn2 = make_unique<TestButton>(parent, "2", wxPoint(10, 90));
 
     // No need to use std::unique_ptr<> for this one, it will be deleted by btn2.
     wxWindow* btn3 = new TestButton(btn2.get(), "3", wxPoint(20, 20));
@@ -296,8 +343,8 @@ TEST_CASE("wxWindow::Dump", "[window]")
 {
     CHECK_NOTHROW( wxDumpWindow(nullptr) );
 
-    std::unique_ptr<wxButton>
-        button(new wxButton(wxTheApp->GetTopWindow(), wxID_ANY, "bloordyblop"));
+    auto button = make_unique<wxButton>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                        "bloordyblop");
 
     const std::string s = wxDumpWindow(button.get()).utf8_string();
 

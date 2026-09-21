@@ -613,6 +613,8 @@ void wxRadioBox::SetString(unsigned int n, const wxString& label)
 
     gtk_label_set_text( g_label, label.utf8_str() );
 #endif
+
+    InvalidateBestSize();
 }
 
 bool wxRadioBox::Enable( bool enable )

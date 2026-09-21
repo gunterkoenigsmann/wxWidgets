@@ -2617,6 +2617,7 @@ wxRichTextLine* wxRichTextParagraphLayoutBox::GetLineAtPosition(long pos, bool c
             if (child)
             {
                 wxRichTextLineVector::const_iterator it = child->GetLines().begin();
+                wxRichTextLine* endOfParagraphLine = nullptr;
                 while (it != child->GetLines().end())
                 {
                     wxRichTextLine* line = *it;
@@ -2628,10 +2629,18 @@ wxRichTextLine* wxRichTextParagraphLayoutBox::GetLineAtPosition(long pos, bool c
                         // If the position is end-of-paragraph, then return the last line of
                         // of the paragraph.
                         ((range.GetEnd() == child->GetRange().GetEnd()-1) && (pos == child->GetRange().GetEnd())))
-                        return line;
+                    {
+                        if ( pos != child->GetRange().GetEnd() )
+                            return line;
+
+                        endOfParagraphLine = line;
+                    }
 
                     ++it;
                 }
+
+                if ( endOfParagraphLine )
+                    return endOfParagraphLine;
             }
         }
 
@@ -4717,53 +4726,65 @@ bool wxRichTextParagraphLayoutBox::FindNextParagraphNumber(wxRichTextParagraph* 
     if (!previousParagraph || !previousParagraph->GetAttributes().HasFlag(wxTEXT_ATTR_BULLET_STYLE) || previousParagraph->GetAttributes().GetBulletStyle() == wxTEXT_ATTR_BULLET_STYLE_NONE)
         return false;
 
+    const wxRichTextAttr& previousAttr = previousParagraph->GetAttributes();
+    const int numberedStyles =
+        wxTEXT_ATTR_BULLET_STYLE_ARABIC |
+        wxTEXT_ATTR_BULLET_STYLE_LETTERS_UPPER |
+        wxTEXT_ATTR_BULLET_STYLE_LETTERS_LOWER |
+        wxTEXT_ATTR_BULLET_STYLE_ROMAN_UPPER |
+        wxTEXT_ATTR_BULLET_STYLE_ROMAN_LOWER |
+        wxTEXT_ATTR_BULLET_STYLE_OUTLINE;
+
     wxRichTextBuffer* buffer = GetBuffer();
     wxRichTextStyleSheet* styleSheet = buffer->GetStyleSheet();
-    if (styleSheet && !previousParagraph->GetAttributes().GetListStyleName().IsEmpty())
+    bool hasListStyle = !previousAttr.GetListStyleName().IsEmpty();
+
+    if ( !(previousAttr.GetBulletStyle() & numberedStyles) ||
+         (!hasListStyle && !previousAttr.HasBulletNumber()) )
+        return false;
+
+    if ( hasListStyle )
     {
-        wxRichTextListStyleDefinition* def = styleSheet->FindListStyle(previousParagraph->GetAttributes().GetListStyleName());
-        if (def)
-        {
-            // int thisIndent = previousParagraph->GetAttributes().GetLeftIndent();
-            // int thisLevel = def->FindLevelForIndent(thisIndent);
-
-            bool isOutline = (previousParagraph->GetAttributes().GetBulletStyle() & wxTEXT_ATTR_BULLET_STYLE_OUTLINE) != 0;
-
-            attr.SetFlags(previousParagraph->GetAttributes().GetFlags() & (wxTEXT_ATTR_BULLET_STYLE|wxTEXT_ATTR_BULLET_NUMBER|wxTEXT_ATTR_BULLET_TEXT|wxTEXT_ATTR_BULLET_NAME));
-            if (previousParagraph->GetAttributes().HasBulletName())
-                attr.SetBulletName(previousParagraph->GetAttributes().GetBulletName());
-            attr.SetBulletStyle(previousParagraph->GetAttributes().GetBulletStyle());
-            attr.SetListStyleName(previousParagraph->GetAttributes().GetListStyleName());
-
-            int nextNumber = previousParagraph->GetAttributes().GetBulletNumber() + 1;
-            attr.SetBulletNumber(nextNumber);
-
-            if (isOutline)
-            {
-                wxString text = previousParagraph->GetAttributes().GetBulletText();
-                if (!text.IsEmpty())
-                {
-                    int pos = text.Find(wxT('.'), true);
-                    if (pos != wxNOT_FOUND)
-                    {
-                        text = text.Mid(0, text.length() - pos - 1);
-                    }
-                    else
-                        text.clear();
-                    if (!text.IsEmpty())
-                        text += wxT(".");
-                    text += wxString::Format(wxT("%d"), nextNumber);
-                    attr.SetBulletText(text);
-                }
-            }
-
-            return true;
-        }
-        else
+        if ( !styleSheet ||
+             !styleSheet->FindListStyle(previousAttr.GetListStyleName()) )
             return false;
     }
-    else
-        return false;
+
+    bool isOutline =
+        (previousAttr.GetBulletStyle() & wxTEXT_ATTR_BULLET_STYLE_OUTLINE) != 0;
+
+    attr.SetFlags(previousAttr.GetFlags() & (wxTEXT_ATTR_BULLET_STYLE|wxTEXT_ATTR_BULLET_NUMBER|wxTEXT_ATTR_BULLET_TEXT|wxTEXT_ATTR_BULLET_NAME));
+    if ( previousAttr.HasBulletName() )
+        attr.SetBulletName(previousAttr.GetBulletName());
+    attr.SetBulletStyle(previousAttr.GetBulletStyle());
+    if ( previousAttr.HasListStyleName() )
+        attr.SetListStyleName(previousAttr.GetListStyleName());
+
+    int nextNumber = previousAttr.HasBulletNumber()
+                        ? previousAttr.GetBulletNumber() + 1
+                        : 1;
+    attr.SetBulletNumber(nextNumber);
+
+    if ( isOutline )
+    {
+        wxString text = previousAttr.GetBulletText();
+        if ( !text.IsEmpty() )
+        {
+            int pos = text.Find(wxT('.'), true);
+            if ( pos != wxNOT_FOUND )
+            {
+                text = text.Mid(0, text.length() - pos - 1);
+            }
+            else
+                text.clear();
+            if ( !text.IsEmpty() )
+                text += wxT(".");
+            text += wxString::Format(wxT("%d"), nextNumber);
+            attr.SetBulletText(text);
+        }
+    }
+
+    return true;
 }
 
 /*!
@@ -5063,6 +5084,7 @@ bool wxRichTextParagraph::Layout(wxReadOnlyDC& dc, wxRichTextDrawingContext& con
     int lineCount = 0;
     int lineAscent = 0;
     int lineDescent = 0;
+    bool lastLineEndedWithLineBreak = false;
 
     wxRichTextObjectList::compatibility_iterator node;
 
@@ -5314,6 +5336,10 @@ bool wxRichTextParagraph::Layout(wxReadOnlyDC& dc, wxRichTextDrawingContext& con
             // Let's find the actual size of the current line now
             wxSize actualSize;
             wxRichTextRange actualRange(lastCompletedEndPos+1, wrapPosition);
+            const bool lineEndsWithLineBreak =
+                nextBreakPos == wrapPosition && nextBreakPos > -1;
+            if ( lineEndsWithLineBreak )
+                actualRange.SetEnd(actualRange.GetEnd() - 1);
 
             childDescent = 0;
 
@@ -5375,6 +5401,7 @@ bool wxRichTextParagraph::Layout(wxReadOnlyDC& dc, wxRichTextDrawingContext& con
 
             lastEndPos = wrapPosition;
             lastCompletedEndPos = lastEndPos;
+            lastLineEndedWithLineBreak = lineEndsWithLineBreak;
 
             lineHeight = 0;
 
@@ -5414,6 +5441,7 @@ bool wxRichTextParagraph::Layout(wxReadOnlyDC& dc, wxRichTextDrawingContext& con
 
             maxWidth = wxMax(maxWidth, currentWidth+currentPosition.x);
             lastEndPos = child->GetRange().GetEnd();
+            lastLineEndedWithLineBreak = false;
 
             node = node->GetNext();
         }
@@ -5423,7 +5451,8 @@ bool wxRichTextParagraph::Layout(wxReadOnlyDC& dc, wxRichTextDrawingContext& con
 
     // Add the last line - it's the current pos -> last para pos
     // Subtract -1 because the last position is always the end-paragraph position.
-    if ((lastCompletedEndPos < GetRange().GetEnd()-1) || lineCount == 0)
+    if ((lastCompletedEndPos < GetRange().GetEnd()-1) ||
+        lineCount == 0 || lastLineEndedWithLineBreak)
     {
         int startOffset = (lineCount == 0 ? startPositionFirstLine : startPositionSubsequentLines);
         availableRect = wxRect(rect.x + startOffset, rect.y + currentPosition.y,

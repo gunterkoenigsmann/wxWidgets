@@ -30,6 +30,12 @@
     #include wxGDK_WAYLAND_HEADER
 
     wxGCC_WARNING_RESTORE(undef)
+
+    // (Re)declare this function with weak attribute to allow easily checking
+    // for its presence at runtime (i.e. easier than with dlsym()).
+    extern "C"
+    struct xdg_toplevel*
+    gdk_wayland_window_get_xdg_toplevel(GdkWindow *window) __attribute__((weak));
 #endif // GDK_WINDOWING_WAYLAND
 
 #ifdef GDK_WINDOWING_X11

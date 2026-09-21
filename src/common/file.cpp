@@ -79,6 +79,7 @@
 #include  "wx/filename.h"
 #include  "wx/file.h"
 #include  "wx/filefn.h"
+#include  "wx/private/filename.h"
 
 // there is no distinction between text and binary files under Unix, so define
 // O_BINARY as 0 if the system headers don't do it already
@@ -546,29 +547,7 @@ bool wxTempFile::Open(const wxString& strName)
         return false;
     }
 
-#ifdef __UNIX__
-    // the temp file should have the same permissions as the original one
-    mode_t mode;
-
-    wxStructStat st;
-    if ( wxStat(m_strName, &st) == 0 )
-    {
-        mode = st.st_mode;
-    }
-    else
-    {
-        // file probably didn't exist, just give it the default mode _using_
-        // user's umask (new files creation should respect umask)
-        mode_t mask = umask(0777);
-        mode = 0666 & ~mask;
-        umask(mask);
-    }
-
-    if ( chmod( (const char*) m_strTemp.fn_str(), mode) == -1 )
-    {
-        wxLogSysError(_("Failed to set temporary file permissions"));
-    }
-#endif // Unix
+    wxInitTempFile(m_strTemp, m_strName);
 
     return true;
 }
@@ -585,7 +564,19 @@ wxTempFile::~wxTempFile()
 
 bool wxTempFile::Commit()
 {
+    // Ensure that the data really reaches the disk before replacing the old
+    // file with this one: otherwise a crash just after the rename could leave
+    // us with neither the old nor the new contents.
+    const bool flushed = m_file.Flush();
+
     m_file.Close();
+
+    if ( !flushed )
+    {
+        // Don't replace the old file if we're not sure that the new contents
+        // was written successfully.
+        return false;
+    }
 
     if ( !wxRenameFile(m_strTemp, m_strName) ) {
         wxLogSysError(_("can't commit changes to file '%s'"), m_strName);

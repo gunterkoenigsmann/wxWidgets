@@ -580,7 +580,6 @@ public:
         , m_pt(pt)
     {
         m_cell = cell;
-        m_bLinkWasClicked = false;
     }
 
     wxHtmlCell* GetCell() const { return m_cell; }
@@ -594,10 +593,6 @@ public:
     wxNODISCARD virtual wxEvent *Clone() const override { return new wxHtmlCellEvent(*this); }
 
 private:
-    // The default ctor exists for the dynamic event creation machinery and
-    // leaves these to their initializers here: without them, reading either
-    // one from a default-constructed event is undefined behaviour, which is
-    // what UBSAN reports as "load of value 93 ... for type 'bool'".
     wxHtmlCell *m_cell = nullptr;
     wxMouseEvent m_mouseEvent;
     wxPoint m_pt;

@@ -58,14 +58,7 @@ namespace TDDarkCol
     static constexpr COLORREF kFootnote = RGB(0x2c, 0x2c, 0x2c);
     static constexpr COLORREF kSeparator = RGB(0x3c, 0x3c, 0x3c);
 
-    static constexpr COLORREF kTextNormal = RGB(0xe0, 0xe0, 0xe0);
-    static constexpr COLORREF kTextInstruct = RGB(0x00, 0x99, 0xff);
-    static constexpr COLORREF kTextContent = RGB(0xe0, 0xe0, 0xe0);
-    static constexpr COLORREF kTextExpando = RGB(0xe0, 0xe0, 0xe0);
-    static constexpr COLORREF kTextVerify = RGB(0xe0, 0xe0, 0xe0);
-    static constexpr COLORREF kTextFootnote = RGB(0xb0, 0xb0, 0xb0);
-    static constexpr COLORREF kTextFtrExp = RGB(0xb0, 0xb0, 0xb0);
-    static constexpr COLORREF kTextRadio = RGB(0xe0, 0xe0, 0xe0);
+    static constexpr COLORREF kTextInstruct = RGB(0x99, 0xeb, 0xff);
 }
 
 namespace
@@ -109,7 +102,7 @@ std::wstring GetCurrentAutomationId(IUIAutomationElement* element)
     return result;
 }
 
-// Cached bounding rect + metadata for a single TaskDialog UI element.
+// Bounding rect + metadata for a single TaskDialog UI element.
 struct TDLayoutElement
 {
     RECT         rect = {};
@@ -123,14 +116,12 @@ struct TDPageState
 {
     wxUxThemeHandle hTD ; // TaskDialog panel + glyph parts
     wxUxThemeHandle hButton ; // Button (checkbox glyph)
-    bool themesOk = false;
 
     AutoHBRUSH brPrimary{TDDarkCol::kPrimary};
     AutoHBRUSH brSecondary{TDDarkCol::kSecondary};
     AutoHBRUSH brFootnote{TDDarkCol::kFootnote};
 
     std::vector<TDLayoutElement> elements;
-    bool elemsOk = false;
 
     // Mouse interaction (message-driven, no polling)
     bool tracking = false;
@@ -270,38 +261,6 @@ void TDRefreshThemes(HWND hwnd, TDPageState& s)
         s.hTD = wxUxThemeHandle::NewAtDPI(hwnd, L"TaskDialog", dpi);
         s.hButton = wxUxThemeHandle::NewAtDPI(hwnd, L"Button", dpi);
     }
-
-    s.themesOk = true;
-}
-
-COLORREF TDGetTextColour(const TDPageState& s, int uiPart)
-{
-    if ( TDHasNativeDarkTheme() )
-    {
-        const wxColour col = s.hTD.GetColour(uiPart, TMT_TEXTCOLOR);
-        if ( col.IsOk() )
-            return wxColourToRGB(col);
-    }
-
-    switch ( uiPart )
-    {
-        case TDLG_MAININSTRUCTIONPANE:
-            return TDDarkCol::kTextInstruct;
-        case TDLG_CONTENTPANE:
-            return TDDarkCol::kTextContent;
-        case TDLG_EXPANDOTEXT:
-            return TDDarkCol::kTextExpando;
-        case TDLG_VERIFICATIONTEXT:
-            return TDDarkCol::kTextVerify;
-        case TDLG_FOOTNOTEPANE:
-            return TDDarkCol::kTextFootnote;
-        case TDLG_EXPANDEDFOOTERAREA:
-            return TDDarkCol::kTextFtrExp;
-        case TDLG_RADIOBUTTONPANE:
-            return TDDarkCol::kTextRadio;
-        default:
-            return TDDarkCol::kTextNormal;
-    }
 }
 
 // ============================================================================
@@ -346,10 +305,10 @@ HICON TDLoadStockIcon(const TASKDIALOGCONFIG* cfg, bool isMain)
 }
 
 // ============================================================================
-// UIA layout cache
+// UIA layout
 // ============================================================================
 
-void TDBuildLayoutCache(HWND hwnd, std::vector<TDLayoutElement>& out)
+void TDBuildLayout(HWND hwnd, std::vector<TDLayoutElement>& out)
 {
     out.clear();
     IUIAutomation* const pAuto = wxTaskDialogDarkModule::GetUIAutomation();
@@ -431,13 +390,9 @@ void TDBuildLayoutCache(HWND hwnd, std::vector<TDLayoutElement>& out)
     }
 }
 
-void TDUpdateLayoutCache(HWND hwnd, TDPageState& s)
+void TDUpdateLayout(HWND hwnd, TDPageState& s)
 {
-    if ( !s.elemsOk )
-    {
-        TDBuildLayoutCache(hwnd, s.elements);
-        s.elemsOk = true;
-    }
+    TDBuildLayout(hwnd, s.elements);
 
     for ( const auto& el : s.elements )
     {
@@ -579,7 +534,7 @@ void TDPaintIcons(HDC hdc, const TDPageState& s)
     }
 }
 
-void TDPaintGlyphs(HDC hdc, TDPageState& s)
+void TDPaintGlyphs(HDC hdc, TDPageState& s, HWND hwnd)
 {
     if ( !s.hTD && !s.hButton )
         return;
@@ -620,9 +575,6 @@ void TDPaintGlyphs(HDC hdc, TDPageState& s)
             const wxSize size =
                 s.hButton.GetDrawSize(BP_CHECKBOX, CBS_UNCHECKEDNORMAL, hdc);
 
-            const int mg = (el.rect.bottom - el.rect.top - size.y) / 3;
-            RECT rc = { el.rect.left + mg + 1,el.rect.top + mg + 1,el.rect.left + mg + 1 + size.x,el.rect.bottom };
-
             int state;
             if ( press )
                 state = s.isChecked ? CBS_CHECKEDPRESSED : CBS_UNCHECKEDPRESSED;
@@ -631,7 +583,17 @@ void TDPaintGlyphs(HDC hdc, TDPageState& s)
             else
                 state = s.isChecked ? CBS_CHECKEDNORMAL : CBS_UNCHECKEDNORMAL;
 
-            ::FillRect(hdc, &rc, s.brSecondary);
+            // Erase the entire area because we are not sure exactly where the
+            // system-drawn checkbox might be. The text is drawn later.
+            ::FillRect(hdc, &el.rect, s.brSecondary);
+
+            // Draw the checkbox at the position observed on Windows 11 25H2.
+            wxSize dpi = wxGetWindowDPI(hwnd);
+            RECT rc = el.rect;
+            rc.left += ::MulDiv(3, dpi.x, 96);
+            rc.top += ::MulDiv(5, dpi.y, 96);
+            rc.right = rc.left + size.x;
+            rc.bottom = rc.top + size.y;
             s.hButton.DrawBackground(hdc, rc, BP_CHECKBOX, state);
         }
     }
@@ -658,11 +620,13 @@ void TDPaintText(HDC hdc, const TDPageState& s)
         {
             part = TDLG_MAININSTRUCTIONPANE;
             brBg = s.brPrimary;
+            dtF |= DT_WORD_ELLIPSIS;
         }
         else if ( el.automationId == L"ContentText" )
         {
             part = TDLG_CONTENTPANE;
             brBg = s.brPrimary;
+            dtF |= DT_WORD_ELLIPSIS;
         }
         else if ( el.automationId == L"ExpandedFooterText" )
         {
@@ -701,8 +665,6 @@ void TDPaintText(HDC hdc, const TDPageState& s)
 
             part = TDLG_VERIFICATIONTEXT;
             brBg = s.brSecondary;
-
-            dtF = DT_LEFT | DT_VCENTER | DT_NOPREFIX;
         }
 
         if ( !part )
@@ -722,7 +684,10 @@ void TDPaintText(HDC hdc, const TDPageState& s)
         else
         {
             opts.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR;
-            opts.crText = TDGetTextColour(s, part);
+            if ( part == TDLG_MAININSTRUCTIONPANE )
+                opts.crText = TDDarkCol::kTextInstruct;
+            else
+                opts.crText = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT).GetPixel();
 
             ::FillRect(hdc, &rcText, brBg);
         }
@@ -733,8 +698,7 @@ void TDPaintText(HDC hdc, const TDPageState& s)
 
 void TDPaintPage(HWND hwnd, HDC hdcWin, TDPageState& s)
 {
-    if ( !s.themesOk )
-        TDRefreshThemes(hwnd, s);
+    TDRefreshThemes(hwnd, s);
 
     const RECT rc = wxGetClientRect(hwnd);
     HDC hdcBuf = 0;
@@ -755,7 +719,7 @@ void TDPaintPage(HWND hwnd, HDC hdcWin, TDPageState& s)
     }
 
     TDPaintIcons(hdcBuf, s);
-    TDPaintGlyphs(hdcBuf, s);
+    TDPaintGlyphs(hdcBuf, s, hwnd);
     TDPaintText(hdcBuf, s);
 
     ::EndBufferedPaint(hbp, TRUE);
@@ -784,8 +748,7 @@ TDPageSubclassProc(HWND hwnd,
                 HDC hdc = ::BeginPaint(hwnd, &ps);
                 TDPageState& s = TDPageState::Get(hwnd);
                 s.isExpanded = ::GetPropW(GetParent(hwnd), L"IsExpanded");
-                s.elemsOk = false;
-                TDUpdateLayoutCache(hwnd, s);
+                TDUpdateLayout(hwnd, s);
                 TDPaintPage(hwnd, hdc, s);
                 ::EndPaint(hwnd, &ps);
             }
@@ -830,23 +793,14 @@ TDPageSubclassProc(HWND hwnd,
 
         case WM_LBUTTONDOWN:
             TDPageState::Get(hwnd).pressing = true;
-            TDUpdateLayoutCache(hwnd, TDPageState::Get(hwnd));
+            TDUpdateLayout(hwnd, TDPageState::Get(hwnd));
             ::InvalidateRect(hwnd, nullptr, FALSE);
             break;
 
         case WM_LBUTTONUP:
             TDPageState::Get(hwnd).pressing = false;
-            TDUpdateLayoutCache(hwnd, TDPageState::Get(hwnd));
+            TDUpdateLayout(hwnd, TDPageState::Get(hwnd));
             ::InvalidateRect(hwnd, nullptr, FALSE);
-            break;
-
-        case WM_THEMECHANGED:
-            {
-                TDPageState& s = TDPageState::Get(hwnd);
-                s.themesOk = false;
-                s.elemsOk = false;
-                ::InvalidateRect(hwnd, nullptr, FALSE);
-            }
             break;
 
         case WM_DESTROY:
@@ -898,7 +852,8 @@ TDCtrlContainerSubclassProc(HWND hwnd,
                 }
 
                 ::SetBkColor(hdc, bg);
-                ::SetTextColor(hdc, TDDarkCol::kTextNormal);
+                auto fg = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT).GetPixel();
+                ::SetTextColor(hdc, fg);
 
                 if ( !hbr )
                     hbr = GetSolidBrush(TDDarkCol::kSecondary);
@@ -947,7 +902,7 @@ TDRadioButtonSubclassProc(HWND hwnd,
 
                 WinStructWordSize<DTTOPTS> opts;
                 opts.dwFlags = DTT_COMPOSITED | DTT_TEXTCOLOR;
-                opts.crText = TDDarkCol::kTextNormal;
+                opts.crText = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT).GetPixel();
 
                 LOGFONT lf = {};
                 if ( hStyle.GetFont(lf, hdcBuf, TDLG_RADIOBUTTONPANE) )
@@ -1080,13 +1035,18 @@ void TDApplyToChildren(IUIAutomationElement* pEl)
 
                 if ( ct == UIA_ProgressBarControlTypeId )
                 {
-                    wxMSWDarkMode::SetTheme
-                    (
-                        hBtn,
-                        wxHasRealDarkTheme(L"Progress", L"DarkMode_CopyEngine::Progress")
-                            ? L"DarkMode_CopyEngine"
-                            : L"DarkMode_Explorer"
-                    );
+                    if ( wxMSWDarkMode::HasDarkTheme() )
+                    {
+                        ::SetWindowTheme(hBtn, L"DarkMode_DarkTheme", L"Progress");
+                    }
+                    else
+                    {
+                        // Disable visual styles so colour messages take effect.
+                        ::SetWindowTheme(hBtn, L"", L"");
+                        // Colours taken from a progress bar with DarkMode_DarkTheme.
+                        ::SendMessage(hBtn, PBM_SETBKCOLOR, 0, 0x131313);
+                        ::SendMessage(hBtn, PBM_SETBARCOLOR, 0, 0x5fcb6c);
+                    }
                 }
                 else if ( ct == UIA_RadioButtonControlTypeId ||
                             id.find(L"RadioButton_") == 0 ||
@@ -1196,8 +1156,7 @@ BOOL CALLBACK TDEnumAttachProc(HWND hwndChild, LPARAM lparam)
     s.defChecked = d->pCfg && (d->pCfg->dwFlags & TDF_VERIFICATION_FLAG_CHECKED);
     s.isExpanded = ::GetPropW(d->hwndTD, L"IsExpanded");
     s.isChecked = s.defChecked || ::GetPropW(d->hwndTD, L"IsChecked");
-    s.elemsOk = false;
-    TDUpdateLayoutCache(hDUI, s);
+    TDUpdateLayout(hDUI, s);
 
     SetWindowSubclassIfNeeded
     (

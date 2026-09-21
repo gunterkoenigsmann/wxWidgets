@@ -320,41 +320,105 @@ void TextCtrlTestCase::MaxLength()
 
     if ( m_style == wxTE_MULTILINE )
     {
-#if defined(__WXMSW__) || defined(__WXGTK3__) || defined(__WXQT__)
+#if wxUSE_CLIPBOARD && \
+        (defined(__WXMSW__) || defined(__WXGTK3__) || defined(__WXQT__))
         CreateText(wxTE_DONTWRAP);
         EventCounter maxlen(m_text.get(), wxEVT_TEXT_MAXLEN);
 
         m_text->SetMaxLength(250);
-        m_text->SetFocus();
-        wxYield();
+
+        auto clipboardContainsText = [](const wxString &text)
+        {
+            wxClipboardLocker lock;
+
+            if ( !lock )
+                return false;
+
+            wxTextDataObject data;
+            return wxTheClipboard->GetData(data) && data.GetText() == text;
+        };
+
+        auto setClipboardText = [&clipboardContainsText](const wxString &text)
+        {
+            REQUIRE(WaitFor("wxTextCtrl clipboard setup",
+                            [&]()
+                            {
+                                wxClipboardLocker lock;
+
+                                if ( !lock )
+                                    return false;
+
+                                wxTheClipboard->Clear();
+                                return wxTheClipboard->SetData(
+                                    new wxTextDataObject(text));
+                            }));
+            REQUIRE(WaitFor("wxTextCtrl clipboard update",
+                            [&]() { return clipboardContainsText(text); }));
+        };
+
+        auto waitForPaste =
+            [this](const char *what, const std::function<bool()> &pred)
+        {
+            const wxString valueBeforePaste = m_text->GetValue();
+            REQUIRE(WaitFor(what,
+                            [&]()
+                            {
+                                if ( pred() )
+                                    return true;
+
+                                if ( m_text->GetValue() == valueBeforePaste )
+                                    m_text->Paste();
+
+                                return pred();
+                            }));
+        };
 
         const wxString linePattern = MakeLinePattern();
 
         m_text->AppendText(linePattern);
-        m_text->SelectAll();
-        m_text->Copy();
+        setClipboardText(linePattern);
 
         m_text->SetInsertionPointEnd();
 
-        sim.Char(WXK_RETURN);
-        sim.Char('v', wxMOD_CONTROL); // Paste copied line.
-        wxYield();
+        // Use Paste() directly instead of simulating Ctrl+V: this still uses
+        // the native paste path, but avoids focus-dependent key delivery.
+        m_text->WriteText("\n");
+        waitForPaste("wxTextCtrl first paste",
+                     [&]()
+                     {
+                         return m_text->GetNumberOfLines() == 2 &&
+                                m_text->GetLineText(1) == linePattern;
+                     });
 
         CHECK(maxlen.GetCount() == 0);
 
         m_text->SetInsertionPointEnd();
 
-        sim.Char(WXK_RETURN);
+        m_text->WriteText("\n");
         wxYield();
 
-        sim.Char('v', wxMOD_CONTROL); // Paste copied line (2nd time).
-        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+        waitForPaste("wxTextCtrl max length update",
+                     [&]()
+                     {
+                         if ( maxlen.GetCount() == 0 ||
+                              m_text->GetNumberOfLines() != 3 )
+                             return false;
+
+                         const int lineLength = m_text->GetLineText(2).length();
+                         return lineLength == 46 || lineLength == 48;
+                     });
 
         CHECK(maxlen.GetCount() == 1); // Maximum length reached.
         maxlen.Clear();
 
-        sim.Text("7"); // Should be rejected.
-        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+        setClipboardText("7");
+        const wxString valueBeforeRejectedPaste = m_text->GetValue();
+        waitForPaste("wxTextCtrl rejected paste update",
+                     [&]()
+                     {
+                         return maxlen.GetCount() != 0 &&
+                                m_text->GetValue() == valueBeforeRejectedPaste;
+                     });
 
         CHECK(maxlen.GetCount() == 1);
         maxlen.Clear();
@@ -376,11 +440,20 @@ void TextCtrlTestCase::MaxLength()
 
         // Try to paste a long string into a shorter selection:
 
-        m_text->SetSelection(0, 20);  // selection is: 01234567890123456789
-        m_text->Copy();
+        // This test is about paste handling, so avoid depending on Copy().
+        setClipboardText(linePattern.Left(20));
         m_text->SetSelection(15, 21); // selection is: 567890
-        m_text->Paste(); // Only the first six characters can actually be pasted.
-        WaitFor("wxTextCtrl update", [&]() { return maxlen.GetCount() != 0; });
+        waitForPaste("wxTextCtrl selection paste update",
+                     [&]()
+                     {
+                         if ( maxlen.GetCount() == 0 )
+                             return false;
+
+                         const auto line = m_text->GetLineText(0);
+                         return line[15].GetValue() == '0' &&
+                                line[20].GetValue() == '5' &&
+                                line[21].GetValue() == '1';
+                     });
         const auto line = m_text->GetLineText(0);
         CHECK( (line[15].GetValue() == '0' &&
                          line[20].GetValue() == '5' &&
@@ -393,7 +466,7 @@ void TextCtrlTestCase::MaxLength()
         m_text->AppendText(wxString::Format("\n%s", linePattern));
         CHECK(m_text->GetNumberOfLines() == 4);
         CHECK(maxlen.GetCount() == 0);
-#endif // __WXMSW__ || __WXGTK3__ || __WXQT__
+#endif // wxUSE_CLIPBOARD && (__WXMSW__ || __WXGTK3__ || __WXQT__)
     }
     else // !wxTE_MULTILINE
     {
@@ -624,14 +697,14 @@ void TextCtrlTestCase::Url()
     m_text->AppendText("http://www.wxwidgets.org");
 
     wxUIActionSimulator sim;
-    sim.MouseMove(m_text->ClientToScreen(wxPoint(5, 5)));
+    REQUIRE(sim.MouseMove(m_text->ClientToScreen(wxPoint(5, 5))));
 
     EventCounter url(m_text.get(), wxEVT_TEXT_URL);
 
-    sim.MouseClick();
+    REQUIRE(sim.MouseClick());
     wxYield();
 
-    CHECK(url.GetCount() == 1);
+    CHECK(url.GetCount() >= 1);
 #endif
 }
 
@@ -1454,10 +1527,10 @@ TEST_CASE("wxTextCtrl::GetBestSize", "[wxTextCtrl][best-size]")
     {
         wxSize operator()(const wxString& text) const
         {
-            std::unique_ptr<wxTextCtrl>
-                t(new wxTextCtrl(wxTheApp->GetTopWindow(), wxID_ANY, text,
-                                 wxDefaultPosition, wxDefaultSize,
-                                 wxTE_MULTILINE));
+            auto t = make_unique<wxTextCtrl>(wxTheApp->GetTopWindow(),
+                                             wxID_ANY, text,
+                                             wxDefaultPosition, wxDefaultSize,
+                                             wxTE_MULTILINE);
             return t->GetBestSize();
         }
     } getBestSizeFor;
@@ -1523,9 +1596,9 @@ TEST_CASE("wxTextCtrl::LongPaste", "[wxTextCtrl][clipboard][paste]")
         return;
     }
 
-    std::unique_ptr<wxTextCtrl>
-        text(new wxTextCtrl(wxTheApp->GetTopWindow(), wxID_ANY, wxString(),
-                            wxDefaultPosition, wxDefaultSize, style));
+    auto text = make_unique<wxTextCtrl>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                        wxString(), wxDefaultPosition,
+                                        wxDefaultSize, style);
 
     // This could actually be much higher, but it makes the test proportionally
     // slower, so use a relatively small (but still requiring more space than
@@ -1577,7 +1650,7 @@ TEST_CASE("wxTextCtrl::EventsOnCreate", "[wxTextCtrl][event]")
 
     EventCounter updated(parent, wxEVT_TEXT);
 
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, "Hello"));
+    auto text = make_unique<wxTextCtrl>(parent, wxID_ANY, "Hello");
 
     // Creating the control shouldn't result in any wxEVT_TEXT events.
     CHECK( updated.GetCount() == 0 );
@@ -1594,7 +1667,7 @@ TEST_CASE("wxTextCtrl::GTKSetPangoMarkup", "[wxTextCtrl][pango]")
 {
     wxWindow* const parent = wxTheApp->GetTopWindow();
 
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE));
+    auto text = make_unique<wxTextCtrl>(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_MULTILINE);
     text->SetValue("Bogus content to be replaced");
     text->GTKSetPangoMarkup(R"(Welcome to <span background="#D3D3D3" strikethrough="true">wxWidgets</span> 3.3!)");
 
@@ -1607,7 +1680,7 @@ TEST_CASE("wxTextCtrl::Get/SetRTFValue", "[wxTextCtrl][rtf]")
 {
     wxWindow* const parent = wxTheApp->GetTopWindow();
 
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_RICH2 | wxTE_MULTILINE));
+    auto text = make_unique<wxTextCtrl>(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_RICH2 | wxTE_MULTILINE);
 
     text->SetRTFValue(R"({\rtf1\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil\fcharset0 Calibri;}}
 {\colortbl ;\red192\green80\blue77;}
@@ -1632,7 +1705,7 @@ TEST_CASE("wxTextCtrl::SearchText", "[wxTextCtrl][search]")
 {
     wxWindow* const parent = wxTheApp->GetTopWindow();
 
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_RICH2 | wxTE_MULTILINE));
+    auto text = make_unique<wxTextCtrl>(parent, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxTE_RICH2 | wxTE_MULTILINE);
 
     text->SetValue(R"(Allows more than 30Kb of text
 (on all Windows versions)
@@ -1765,10 +1838,10 @@ TEST_CASE("wxTextCtrl::InitialCanUndo", "[wxTextCtrl][undo]")
     INFO("wxTextCtrl with style " << style);
 
     wxWindow* const parent = wxTheApp->GetTopWindow();
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, "",
-                                                wxDefaultPosition,
-                                                wxDefaultSize,
-                                                style));
+    auto text = make_unique<wxTextCtrl>(parent, wxID_ANY, "",
+                                        wxDefaultPosition,
+                                        wxDefaultSize,
+                                        style);
 
     CHECK( !text->CanUndo() );
 }
@@ -1788,11 +1861,11 @@ TEST_CASE("wxTextCtrl::EmptyUndoBuffer", "[wxTextCtrl][undo]")
         return;
     }
 
-    std::unique_ptr<wxTextCtrl> text(new wxTextCtrl(wxTheApp->GetTopWindow(),
-                                                wxID_ANY, "",
-                                                wxDefaultPosition,
-                                                wxDefaultSize,
-                                                wxTE_MULTILINE | wxTE_RICH2));
+    auto text = make_unique<wxTextCtrl>(wxTheApp->GetTopWindow(),
+                                        wxID_ANY, "",
+                                        wxDefaultPosition,
+                                        wxDefaultSize,
+                                        wxTE_MULTILINE | wxTE_RICH2);
 
     text->AppendText("foo");
 

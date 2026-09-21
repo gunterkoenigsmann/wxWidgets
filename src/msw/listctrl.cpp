@@ -3333,7 +3333,11 @@ void DrawGridLines(wxListCtrl* listctrl, int item, int gap = 0)
 // taking into account whether the control is enabled or not.
 wxColour GetEffectiveBackgroundColour(wxListCtrl* listctrl)
 {
-    if ( listctrl->IsEnabled() )
+    // Note that we must use IsThisEnabled() and not IsEnabled() here: the
+    // latter is also false when just a parent is disabled, which notably
+    // happens while a modal dialog is shown, and the items shouldn't appear
+    // disabled then, if only because the native control doesn't do it either.
+    if ( listctrl->IsThisEnabled() )
         return listctrl->GetBackgroundColour();
     else
         return wxSystemSettings::GetColour(wxSYS_COLOUR_BTNFACE);
@@ -3462,12 +3466,6 @@ void HandleItemPaint(wxListCtrl* listctrl, LPNMLVCUSTOMDRAW pLVCD)
 
 WXLPARAM HandleItemPrepaint(wxListCtrl* listctrl, LPNMLVCUSTOMDRAW pLVCD)
 {
-    if ( wxMSWDarkMode::IsActive() )
-    {
-        HandleItemPaint(listctrl, pLVCD);
-        return CDRF_SKIPDEFAULT;
-    }
-
     wxItemAttr* attr = listctrl->MSWGetItemColumnAttr(pLVCD->nmcd.dwItemSpec, pLVCD->iSubItem);
 
     pLVCD->clrText = attr && attr->HasTextColour()
@@ -3547,6 +3545,26 @@ WXLPARAM wxListCtrl::OnCustomDraw(WXLPARAM lParam)
             break;
 
         case CDDS_ITEMPREPAINT:
+            // In dark mode we draw the items entirely on our own and we must
+            // do it here rather than when handling CDDS_SUBITEM below because
+            // HandleItemPaint() draws the whole row, including all of its
+            // columns, at once: calling it from the subitem handler would
+            // repeat the same drawing once per column, which is not only
+            // wasteful but also results in visible delays when scrolling
+            // lists with many columns.
+            if ( wxMSWDarkMode::IsActive() && InReportView() )
+            {
+                const int item = nmcd.dwItemSpec;
+
+                // As below, this message can be received with item == 0 even
+                // for an empty control, so check that the item really exists.
+                if ( item >= 0 && item < GetItemCount() )
+                {
+                    HandleItemPaint(this, pLVCD);
+                    return CDRF_SKIPDEFAULT;
+                }
+            }
+
             // set the text foreground and background colour for listview
             // and icon view, these don't get messages for subitems
             pLVCD->clrText = wxColourToRGB(GetForegroundColour());

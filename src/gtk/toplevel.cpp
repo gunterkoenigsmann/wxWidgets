@@ -698,7 +698,14 @@ void wxTopLevelWindowGTK::GTKConfigureEvent(int x, int y)
 // XDG session management support under Wayland
 // ----------------------------------------------------------------------------
 
-#ifdef wxHAVE_WAYLAND_SESSION_MANAGEMENT
+// Not under GTK 4: everything below is built on GdkWindow, from the type the
+// signal is looked up on to the signature of the handler connected to it, so
+// the branch reporting it as unsupported is taken there instead.
+#if defined(wxHAVE_WAYLAND_SESSION_MANAGEMENT) && !defined(__WXGTK4__)
+    #define wxHAS_WAYLAND_XDG_SESSION
+#endif
+
+#ifdef wxHAS_WAYLAND_XDG_SESSION
 
 using wxWayland::wl_unique_ptr;
 
@@ -782,7 +789,7 @@ static gboolean wxgtk_tlw_xdg_realized(GdkWindow* window, wxTopLevelWindow* win)
     xdgSession.reset(xdg_session_manager_v1_get_session(
         wxWayland::WLGlobals.session_manager.get(),
         XDG_SESSION_MANAGER_V1_REASON_LAUNCH,
-        data->m_sessionId.empty() ? nullptr : data->m_sessionId.utf8_str()
+        data->m_sessionId.empty() ? nullptr : data->m_sessionId.utf8_str().data()
     ));
     wxCHECK_MSG( xdgSession, FALSE, "Failed to get xdg_session" );
 
@@ -872,7 +879,7 @@ wxString wxTopLevelWindowGTK::GetWaylandXDGSessionId() const
     return m_xdgSessionData ? m_xdgSessionData->m_sessionId : wxString{};
 }
 
-#else // !wxHAVE_WAYLAND_SESSION_MANAGEMENT
+#else // !wxHAS_WAYLAND_XDG_SESSION
 
 /* static */
 bool wxTopLevelWindowGTK::HasWaylandXDGSessionManagement()
@@ -891,7 +898,7 @@ wxString wxTopLevelWindowGTK::GetWaylandXDGSessionId() const
     return {};
 }
 
-#endif // wxHAVE_WAYLAND_SESSION_MANAGEMENT/!wxHAVE_WAYLAND_SESSION_MANAGEMENT
+#endif // wxHAS_WAYLAND_XDG_SESSION/!wxHAS_WAYLAND_XDG_SESSION
 
 #if GTK_CHECK_VERSION(3,10,0) && !defined(__WXGTK4__)
 // Not needed under GTK4, which has gtk_window_get_titlebar().
@@ -1051,13 +1058,13 @@ void wxTopLevelWindowGTK::GTKHandleRealized()
 
 void wxTopLevelWindowGTK::GTKHandleUnrealized()
 {
-#ifdef wxHAVE_WAYLAND_SESSION_MANAGEMENT
+#ifdef wxHAS_WAYLAND_XDG_SESSION
     if ( m_xdgSessionData )
     {
         delete m_xdgSessionData;
         m_xdgSessionData = nullptr;
     }
-#endif // wxHAVE_WAYLAND_SESSION_MANAGEMENT
+#endif // wxHAS_WAYLAND_XDG_SESSION
 
     wxTopLevelWindowBase::GTKHandleUnrealized();
 }

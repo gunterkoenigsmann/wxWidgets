@@ -38,6 +38,10 @@
 #include "wx/tooltip.h"
 #include "wx/wupdlock.h"
 
+#if wxUSE_SCROLLBAR
+    #include "wx/scrolwin.h"
+#endif // wxUSE_SCROLLBAR
+
 #ifdef __WXGTK__
     #include "wx/gtk/private/backend.h"
 #endif // __WXGTK__
@@ -149,6 +153,45 @@ private:
 };
 #endif // wxUSE_HELP
 
+#if wxUSE_SCROLLBAR
+
+class ScrollCountingWindow : public wxScrolledWindow
+{
+public:
+    ScrollCountingWindow(wxWindow* parent)
+        : wxScrolledWindow(parent, wxID_ANY, wxDefaultPosition, wxSize(100, 100))
+    {
+        SetScrollRate(10, 10);
+        SetVirtualSize(1000, 1000);
+        ResetScrollWindowCalls();
+    }
+
+    virtual void ScrollWindow(int dx, int dy,
+                              const wxRect* rect = nullptr) override
+    {
+        wxUnusedVar(rect);
+
+        m_scrollWindowCallCount++;
+        m_lastScrollWindowDelta = wxPoint(dx, dy);
+    }
+
+    void ResetScrollWindowCalls()
+    {
+        m_scrollWindowCallCount = 0;
+        m_lastScrollWindowDelta = wxPoint();
+    }
+
+    int GetScrollWindowCallCount() const { return m_scrollWindowCallCount; }
+
+    wxPoint GetLastScrollWindowDelta() const { return m_lastScrollWindowDelta; }
+
+private:
+    int m_scrollWindowCallCount = 0;
+    wxPoint m_lastScrollWindowDelta;
+};
+
+#endif // wxUSE_SCROLLBAR
+
 static void DoTestShowHideEvent(wxWindow* window)
 {
     EventCounter show(window, wxEVT_SHOW);
@@ -165,6 +208,32 @@ static void DoTestShowHideEvent(wxWindow* window)
 
     CHECK( show.GetCount() == 2 );
 }
+
+#if wxUSE_SCROLLBAR
+
+TEST_CASE_METHOD(WindowTestCase, "Window::ScrolledWindowPhysicalScrolling",
+                 "[window][scroll]")
+{
+    auto win = make_unique<ScrollCountingWindow>(wxTheApp->GetTopWindow());
+
+    win->EnableScrolling(false, false);
+    win->Scroll(1, 2);
+
+    CHECK( win->GetViewStart() == wxPoint(1, 2) );
+    CHECK( win->GetScrollWindowCallCount() == 0 );
+
+    win->Scroll(0, 0);
+    win->EnableScrolling(true, false);
+    win->ResetScrollWindowCalls();
+
+    win->Scroll(1, 2);
+
+    CHECK( win->GetViewStart() == wxPoint(1, 2) );
+    REQUIRE( win->GetScrollWindowCallCount() == 1 );
+    CHECK( win->GetLastScrollWindowDelta() == wxPoint(-10, 0) );
+}
+
+#endif // wxUSE_SCROLLBAR
 
 TEST_CASE_METHOD(WindowTestCase, "Window::ShowHideEvent", "[window]")
 {
@@ -740,8 +809,8 @@ TEST_CASE_METHOD(WindowTestCase, "Window::FindWindowBy", "[window]")
 TEST_CASE_METHOD(WindowTestCase, "Window::SizerErrors", "[window][sizer][error]")
 {
     wxWindow* const child = new wxWindow(m_window, wxID_ANY);
-    std::unique_ptr<wxSizer> const sizer1(new wxBoxSizer(wxHORIZONTAL));
-    std::unique_ptr<wxSizer> const sizer2(new wxBoxSizer(wxHORIZONTAL));
+    auto const sizer1 = make_unique<wxBoxSizer>(wxHORIZONTAL);
+    auto const sizer2 = make_unique<wxBoxSizer>(wxHORIZONTAL);
 
     REQUIRE_NOTHROW( sizer1->Add(child) );
 #ifdef __WXDEBUG__
@@ -822,9 +891,7 @@ TEST_CASE_METHOD(WindowTestCase, "Window::Refresh", "[window]")
     // GTK3 with a native Wayland backend doesn't support partial redraws at
     // all: any invalidation anywhere ends up repainting every window with
     // its own full bounds, so don't check this there.
-#ifdef __WXGTK3__
-    if ( wxGTKImpl::IsX11(nullptr) )
-#endif // __WXGTK3__
+    if ( !IsRunningUnderWayland() )
         CHECK(isChild1Painted == false);
     CHECK(isParentPainted == true);
     CHECK(isChild2Painted == true);

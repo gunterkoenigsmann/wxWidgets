@@ -53,6 +53,9 @@ static inline GdkDisplay* GetDisplay()
 
 static inline unsigned wxGtkGetMonitorCount(GdkDisplay* display)
 {
+    if (display == nullptr)
+        return 0;
+
     return g_list_model_get_n_items(gdk_display_get_monitors(display));
 }
 
@@ -60,6 +63,9 @@ static inline unsigned wxGtkGetMonitorCount(GdkDisplay* display)
 // the index is out of range.
 static inline GdkMonitor* wxGtkGetMonitor(GdkDisplay* display, unsigned i)
 {
+    if (display == nullptr)
+        return nullptr;
+
     return static_cast<GdkMonitor*>(
                 g_list_model_get_item(gdk_display_get_monitors(display), i));
 }
@@ -67,7 +73,7 @@ static inline GdkMonitor* wxGtkGetMonitor(GdkDisplay* display, unsigned i)
 // Index of the given monitor in the display's monitor list or wxNOT_FOUND.
 static int wxGtkFindMonitorIndex(GdkDisplay* display, GdkMonitor* monitor)
 {
-    if (monitor == nullptr)
+    if (display == nullptr || monitor == nullptr)
         return wxNOT_FOUND;
 
     GListModel* const monitors = gdk_display_get_monitors(display);
@@ -140,19 +146,21 @@ int wxDisplayFactoryGTK::GetFromPoint(const wxPoint& pt)
     // ourselves. This also subsumes the containment check done separately by
     // the GTK+ 3 code above, which was needed because that function returned
     // the monitor merely closest to the point if none actually contained it.
-    GdkDisplay* const display = ::GetDisplay();
-    GListModel* const monitors = gdk_display_get_monitors(display);
-    for (unsigned i = g_list_model_get_n_items(monitors); i--;)
+    if (GdkDisplay* const display = ::GetDisplay())
     {
-        GdkMonitor* const monitor =
-            static_cast<GdkMonitor*>(g_list_model_get_item(monitors, i));
+        GListModel* const monitors = gdk_display_get_monitors(display);
+        for (unsigned i = g_list_model_get_n_items(monitors); i--;)
+        {
+            GdkMonitor* const monitor =
+                static_cast<GdkMonitor*>(g_list_model_get_item(monitors, i));
 
-        GdkRectangle rect;
-        gdk_monitor_get_geometry(monitor, &rect);
-        g_object_unref(monitor);
+            GdkRectangle rect;
+            gdk_monitor_get_geometry(monitor, &rect);
+            g_object_unref(monitor);
 
-        if (wxRect(rect.x, rect.y, rect.width, rect.height).Contains(pt))
-            return int(i);
+            if (wxRect(rect.x, rect.y, rect.width, rect.height).Contains(pt))
+                return int(i);
+        }
     }
     return wxNOT_FOUND;
 }
@@ -331,7 +339,10 @@ wx_gdk_screen_get_monitor_workarea(GdkScreen* screen, int monitor, GdkRectangle*
 
 static inline GdkScreen* GetScreen()
 {
-    return gdk_window_get_screen(wxGetTopLevelGDK());
+    if (GdkWindow* window = wxGetTopLevelGDK())
+        return gdk_window_get_screen(window);
+
+    return nullptr;
 }
 
 class wxDisplayImplGTK : public wxDisplayImpl
@@ -376,18 +387,24 @@ wxDisplayImpl* wxDisplayFactoryGTK::CreateDisplay(unsigned n)
 
 unsigned wxDisplayFactoryGTK::GetCount()
 {
-    return gdk_screen_get_n_monitors(GetScreen());
+    GdkScreen* screen = GetScreen();
+    return screen ? gdk_screen_get_n_monitors(screen) : 0;
 }
 
 int wxDisplayFactoryGTK::GetFromPoint(const wxPoint& pt)
 {
-    GdkRectangle rect;
     GdkScreen* screen = GetScreen();
-    int monitor = gdk_screen_get_monitor_at_point(screen, pt.x, pt.y);
-    gdk_screen_get_monitor_geometry(screen, monitor, &rect);
-    if (!wxRect(rect.x, rect.y, rect.width, rect.height).Contains(pt))
-        monitor = wxNOT_FOUND;
-    return monitor;
+    if (screen)
+    {
+        GdkRectangle rect;
+        int monitor = gdk_screen_get_monitor_at_point(screen, pt.x, pt.y);
+        gdk_screen_get_monitor_geometry(screen, monitor, &rect);
+        if (!wxRect(rect.x, rect.y, rect.width, rect.height).Contains(pt))
+            monitor = wxNOT_FOUND;
+        return monitor;
+    }
+
+    return wxNOT_FOUND;
 }
 
 int wxDisplayFactoryGTK::GetFromWindow(const wxWindow* win)

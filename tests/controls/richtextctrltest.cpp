@@ -392,6 +392,46 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::CaretPosition",
     CHECK(m_rich->GetCaretPosition() == 21);
 }
 
+TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::LineBreak",
+                 "[richtextctrl]")
+{
+    m_rich->WriteText("one");
+
+    REQUIRE(m_rich->LineBreak());
+
+    m_rich->LayoutContent();
+
+    CHECK(m_rich->GetFocusObject()->GetLineCount() == 2);
+    CHECK(m_rich->GetCaretPosition() == 3);
+    CHECK(m_rich->GetCaretAtLineStart());
+
+    m_rich->MoveLeft();
+
+    CHECK(m_rich->GetCaretPosition() == 2);
+    CHECK(!m_rich->GetCaretAtLineStart());
+
+    m_rich->MoveRight();
+
+    CHECK(m_rich->GetCaretPosition() == 3);
+    CHECK(m_rich->GetCaretAtLineStart());
+
+    m_rich->WriteText("two");
+
+    wxString text;
+    text << "one" << wxRichTextLineBreakChar << "two";
+
+    CHECK(m_rich->GetValue() == text);
+
+    m_rich->MoveToLineStart();
+
+    CHECK(m_rich->GetCaretPosition() == 3);
+    CHECK(m_rich->GetCaretAtLineStart());
+
+    m_rich->MoveToLineEnd();
+
+    CHECK(m_rich->GetCaretPosition() == 6);
+}
+
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Selection",
                  "[richtextctrl]")
 {
@@ -659,6 +699,27 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::TextColour",
     CHECK(colour.GetTextColour() == m_rich->GetBasicStyle().GetTextColour());
 }
 
+TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::AppendTextStyle",
+                 "[richtextctrl]")
+{
+    m_rich->BeginTextColour(*wxRED);
+    m_rich->WriteText("red");
+    m_rich->EndTextColour();
+
+    m_rich->BeginTextColour(*wxBLUE);
+    m_rich->AppendText("blue");
+    m_rich->EndTextColour();
+
+    wxTextAttr colour;
+    m_rich->GetStyle(1, colour);
+
+    CHECK(colour.GetTextColour() == *wxRED);
+
+    m_rich->GetStyle(5, colour);
+
+    CHECK(colour.GetTextColour() == *wxBLUE);
+}
+
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::NumberedBullet",
                  "[richtextctrl]")
 {
@@ -677,6 +738,16 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::NumberedBullet",
     CHECK(bullet.GetBulletNumber() == 1);
     CHECK(bullet.GetLeftIndent() == 15);
     CHECK(bullet.GetLeftSubIndent() == 20);
+
+    wxRichTextParagraph *firstPara =
+        m_rich->GetFocusObject()->GetParagraphAtPosition(5);
+    wxRichTextAttr nextBullet;
+
+    REQUIRE(m_rich->GetFocusObject()->FindNextParagraphNumber(firstPara,
+                                                              nextBullet));
+    CHECK(nextBullet.HasBulletStyle());
+    CHECK(nextBullet.HasBulletNumber());
+    CHECK(nextBullet.GetBulletNumber() == 2);
 
     m_rich->GetStyle(15, bullet);
 
