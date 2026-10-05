@@ -69,6 +69,23 @@ installed with `gtk_widget_insert_action_group()` on the frame would be found
 by a controller also attached to the frame; it is. That single fact is what
 makes it possible to keep menu accelerators working at all.
 
+**Superseded (October 2026).** Upstream's `ClaimsKeyBeforeAccelerator()` and
+`wxEVT_ACCELERATOR_KEY` (commit `1043551376`) put the decision between the
+focused window and the accelerator in wx, before the key is handled, and a
+`GtkShortcut` cannot take part in that: it runs after the focused widget has
+been offered the key, and its callback is not given the event. So the shortcut
+controller is gone and `wxGTKHandleKeyPress()` activates menu accelerators
+itself, as `gtk_window_activate_key()` does for GTK+ 3: it finds the item with
+`wxMenuBar::FindItemForAccelKey()` and activates its action, which keeps check
+and radio state in step. That also retired `GTKShouldPreProcessKey()` (#221).
+
+Every wx window has a key controller, and GTK4 runs each of them as the event
+goes up from the focused widget, so the first wx window to see a key event
+also has to be the only one to handle it -- the job `EventAlreadyProcessed()`
+does for GTK+ 3. A top level window's controller sits on the `GtkWindow`
+itself, because with nothing focused in it the key events are delivered there
+and never reach its client area.
+
 A separate one-line probe established that **`GdkTexture` implements `GIcon`**.
 That matters because `GMenuItem` accepts only a `GIcon` for its icon
 attribute, which at first reading looked like it ruled out arbitrary
@@ -90,7 +107,7 @@ attribute, which at first reading looked like it ruled out arbitrary
 | `Enable()` | `g_simple_action_set_enabled()` |
 | `Check()` / `IsChecked()` | the action's state |
 | accelerator display | the item's `"accel"` attribute |
-| accelerator activation | `GtkShortcutController` + `GtkNamedAction` on the frame |
+| accelerator activation | wx's own key handling, activating the item's `GSimpleAction` (see below) |
 | bitmap | `g_menu_item_set_icon()` with a `GdkTexture` |
 
 ### 3.1 Rebuild rather than patch

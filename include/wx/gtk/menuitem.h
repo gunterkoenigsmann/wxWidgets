@@ -54,6 +54,12 @@ public:
     const wxString& GTKGetRadioTarget() const { return m_radioTarget; }
     void GTKSetRadioTarget(const wxString& target) { m_radioTarget = target; }
 
+#if wxUSE_ACCEL
+    // Do what choosing this item from its menu does, for its accelerator.
+    // Returns false, doing nothing, if the item cannot be chosen now.
+    bool GTKActivate();
+#endif // wxUSE_ACCEL
+
     // The window last passed to SetupBitmaps(), used to pick the bitmap
     // variant matching its DPI when the menu model is (re)built.
     wxWindow* GTKGetBitmapWindow() const { return m_bitmapWin; }

@@ -19,6 +19,7 @@
     #include "wx/log.h"
     #include "wx/app.h"
     #include "wx/toplevel.h"
+    #include "wx/frame.h"
     #include "wx/dcclient.h"
     #include "wx/menu.h"
     #include "wx/settings.h"
@@ -1709,9 +1710,21 @@ wxGTKHandleKeyPress(wxWindow* win,
 
         case wxWindowGTK::AcceleratorVerdict::Menu:
 #ifdef __WXGTK4__
-            // Menu accelerators are shortcuts on the frame's
-            // GtkShortcutController, which GTK runs itself once this handler
-            // returns without handling the key.
+            // There is no GTK4 equivalent of gtk_window_activate_key(), so
+            // activate the item ourselves.
+#if wxUSE_MENUBAR
+            if ( wxFrame* const frame = wxDynamicCast(ancestor, wxFrame) )
+            {
+                if ( wxMenuBar* const menuBar = frame->GetMenuBar() )
+                {
+                    if ( wxMenuItem* const item =
+                            menuBar->FindItemForAccelKey(event) )
+                    {
+                        ret = item->GTKActivate();
+                    }
+                }
+            }
+#endif // wxUSE_MENUBAR
 #else
             // This one comes from the menu bar, let GTK activate it as it
             // would have done by default.
@@ -1740,14 +1753,12 @@ wxGTKHandleKeyPress(wxWindow* win,
             break;
 
         case wxWindowGTK::AcceleratorVerdict::Window:
+#ifndef __WXGTK4__
             // The window wants to handle this key itself, so prevent the key
             // from being used as accelerator from wxgtk_tlw_key_press_event()
             // after we return from here.
-#ifdef __WXGTK4__
-            // The shortcut controller asks GTKShouldPreProcessKey() instead.
-#else
             wxKeyEventClaimedByWindow = nativeEvent;
-#endif
+#endif // !__WXGTK4__
             break;
     }
 #endif // wxUSE_ACCEL
@@ -1861,6 +1872,39 @@ wxGTKHandleKeyPress(wxWindow* win,
 
 #ifdef __WXGTK4__
 
+// A key event goes up from the focused widget to the top level window, and
+// each wx window on the way has a key controller, so all of them would see it.
+// Only the first, innermost, one must handle it, as GTK3's
+// EventAlreadyProcessed() ensures there. Returns true for the others.
+static bool wxGTKKeyEventAlreadySeen(GtkEventController* controller)
+{
+    GdkEvent* const event = gtk_event_controller_get_current_event(controller);
+    if ( !event )
+        return false;
+
+    // The pointer alone could be reused by a later event once this one is
+    // freed, so compare what identifies the key event as well.
+    static const GdkEvent* s_last = nullptr;
+    static GdkEventType s_type;
+    static guint32 s_time;
+    static guint s_keycode;
+
+    const GdkEventType type = gdk_event_get_event_type(event);
+    const guint32 time = gdk_event_get_time(event);
+    const guint keycode = gdk_key_event_get_keycode(event);
+
+    if ( event == s_last && type == s_type && time == s_time &&
+            keycode == s_keycode )
+        return true;
+
+    s_last = event;
+    s_type = type;
+    s_time = time;
+    s_keycode = keycode;
+
+    return false;
+}
+
 extern "C" {
 
 // GtkEventControllerKey::key-pressed(keyval, keycode, state) -> gboolean.
@@ -1874,13 +1918,10 @@ wx_gtk_key_pressed_callback(GtkEventControllerKey* controller,
     if (g_blockEventsOnDrag)
         return FALSE;
 
-    // No EventAlreadyProcessed() check here, deliberately: that guarded
-    // against GTK3 propagating one native event up the widget hierarchy so
-    // that several wxWindows saw it. A controller is attached to one widget
-    // and only fires for it, so the duplication it defended against cannot
-    // arise. See docs/gtk/gtk4-phase3-input-model-design.md section 2.
-
     GtkEventController* const c = GTK_EVENT_CONTROLLER(controller);
+
+    if ( wxGTKKeyEventAlreadySeen(c) )
+        return FALSE;
 
     wxGTKKeyEventData keyData;
     keyData.keyval = keyval;
@@ -1924,6 +1965,9 @@ wx_gtk_key_released_callback(GtkEventControllerKey* controller,
                              wxWindowGTK* win)
 {
     if (g_blockEventsOnDrag)
+        return;
+
+    if ( wxGTKKeyEventAlreadySeen(GTK_EVENT_CONTROLLER(controller)) )
         return;
 
     wxGTKKeyEventData keyData;
@@ -6406,8 +6450,16 @@ void wxWindowGTK::ConnectWidget( GtkWidget *widget )
                           G_CALLBACK (wx_gtk_key_pressed_callback), this);
         g_signal_connect (keyController, "key-released",
                           G_CALLBACK (wx_gtk_key_released_callback), this);
+
+        // A top level window with no focused child is the target of the key
+        // events itself, and they never reach its client area, so its
+        // controller goes on the GtkWindow. As an ancestor of everything else
+        // in it, it sees every key event that bubbles up from its children
+        // too, which wxGTKKeyEventAlreadySeen() makes it ignore.
+        GtkWidget* const keyWidget = IsTopLevel() ? m_widget : focusWidget;
+
         // The widget takes ownership of the controller.
-        gtk_widget_add_controller(focusWidget, keyController);
+        gtk_widget_add_controller(keyWidget, keyController);
     }
 #else
     g_signal_connect (focusWidget, "key_press_event",

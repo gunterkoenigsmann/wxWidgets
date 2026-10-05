@@ -63,14 +63,8 @@ private:
     GtkWidget* m_menubar;
 
 #ifdef __WXGTK4__
-    // The model rendered by m_menubar (a GtkPopoverMenuBar under GTK4) and the
-    // controller holding the shortcuts for all our accelerators, created when
-    // we're attached to a frame and destroyed when we're detached from it.
+    // The model rendered by m_menubar (a GtkPopoverMenuBar under GTK4).
     GMenu* m_barModel;
-    GtkEventController* m_shortcuts;
-
-    // Removes m_shortcuts from the given widget, which owns it.
-    void GTKRemoveShortcuts(GtkWidget* target);
 #endif // __WXGTK4__
 
     wxDECLARE_DYNAMIC_CLASS(wxMenuBar);
@@ -124,14 +118,9 @@ public:
     // Insert (or remove) the action groups of this menu and of all its sub
     // menus into (from) the given widget. Named actions are resolved by
     // walking up the widget hierarchy, so this must be a widget which is an
-    // ancestor of both the menu view and any shortcut controller using them.
+    // ancestor of the menu view using them.
     void GTKInstallActions(GtkWidget* widget);
     void GTKUninstallActions(GtkWidget* widget);
-
-    // Add the accelerators of this menu and of all its sub menus to the given
-    // shortcut controller. GTK4 has no accelerator groups: menu accelerators
-    // are GtkShortcuts triggering the items' named actions.
-    void GTKAddShortcuts(GtkShortcutController* controller);
 
     // Called when one of our radio group actions changed state, with the bare
     // action name and the target value of the item which is now selected.
@@ -165,10 +154,6 @@ private:
     void GtkAppend(wxMenuItem* item, int pos = -1);
 
 #ifdef __WXGTK4__
-    // Ask the menu bar we (possibly indirectly) belong to, if any, to refresh
-    // the shortcuts it registered for our items' accelerators.
-    void GTKRefreshShortcuts();
-
     GMenu* m_menuModel;
     GSimpleActionGroup* m_actionGroup;
     wxString m_actionPrefix;
