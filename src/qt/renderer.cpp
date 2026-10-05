@@ -610,9 +610,11 @@ wxRendererQt::DrawItemSelectionRect(wxWindow* win, wxDC& dc, const wxRect& rect,
     option.initFrom(qtWidget);
     option.rect = wxQtConvertRect(rect);
 
+    // Added to what initFrom() set rather than replacing it: a style may draw
+    // nothing for an item that is not also enabled.
     if ( flags & wxCONTROL_SELECTED )
     {
-        option.state = QStyle::State_Selected;
+        option.state |= QStyle::State_Selected;
         option.showDecorationSelected = true;
     }
 
