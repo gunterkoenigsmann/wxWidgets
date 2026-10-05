@@ -3037,6 +3037,8 @@ COND_TOOLKIT_GTK_TOOLKIT_VERSION_2_GUI_HDR =  \
 	wx/gtk/dvrenderer.h \
 	wx/gtk/srchctrl.h \
 	wx/generic/imaglist.h \
+	wx/generic/filedlgg.h \
+	wx/generic/dirdlgg.h \
 	wx/generic/fontdlgg.h
 @COND_TOOLKIT_GTK_TOOLKIT_VERSION_2@GUI_HDR = $(COND_TOOLKIT_GTK_TOOLKIT_VERSION_2_GUI_HDR)
 COND_TOOLKIT_GTK_TOOLKIT_VERSION_3_GUI_HDR =  \
@@ -3101,7 +3103,9 @@ COND_TOOLKIT_GTK_TOOLKIT_VERSION_3_GUI_HDR =  \
 	wx/gtk/dataview.h \
 	wx/gtk/dvrenderer.h \
 	wx/gtk/srchctrl.h \
-	wx/generic/imaglist.h
+	wx/generic/imaglist.h \
+	wx/generic/filedlgg.h \
+	wx/generic/dirdlgg.h
 @COND_TOOLKIT_GTK_TOOLKIT_VERSION_3@GUI_HDR = $(COND_TOOLKIT_GTK_TOOLKIT_VERSION_3_GUI_HDR)
 COND_TOOLKIT_GTK_TOOLKIT_VERSION_4_GUI_HDR =  \
 	wx/generic/fdrepdlg.h \
@@ -3165,7 +3169,9 @@ COND_TOOLKIT_GTK_TOOLKIT_VERSION_4_GUI_HDR =  \
 	wx/gtk/dataview.h \
 	wx/gtk/dvrenderer.h \
 	wx/gtk/srchctrl.h \
-	wx/generic/imaglist.h
+	wx/generic/imaglist.h \
+	wx/generic/filedlgg.h \
+	wx/generic/dirdlgg.h
 @COND_TOOLKIT_GTK_TOOLKIT_VERSION_4@GUI_HDR = $(COND_TOOLKIT_GTK_TOOLKIT_VERSION_4_GUI_HDR)
 COND_TOOLKIT_MSW_GUI_HDR =  \
 	wx/generic/clrpickerg.h \
