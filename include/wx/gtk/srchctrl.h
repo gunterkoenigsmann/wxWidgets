@@ -96,16 +96,6 @@ private:
 #endif // wxUSE_MENUS/!wxUSE_MENUS
     }
 
-
-#ifdef __WXGTK4__
-    // Keep the keys our text entry binds; see #221.
-    virtual bool GTKShouldPreProcessKey(int keyval,
-                                        int modifiers) const override
-    {
-        return GTKEntryWantsKey(IsEditable(), keyval, modifiers);
-    }
-#endif // __WXGTK4__
-
 protected:
 #if wxUSE_ACCEL
     // Reserve the keys used for editing the text in this control.

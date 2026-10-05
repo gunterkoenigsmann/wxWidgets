@@ -62,10 +62,9 @@ public:
     bool IsOk() const { return m_key != 0; }
 
 #ifdef __WXGTK4__
-    // GTK4 has no GtkAccelGroup: accelerators are GtkShortcuts built from the
-    // key and modifiers, and displayed from the "accel" menu item attribute,
-    // so the accelerator is used directly instead of being installed on a
-    // widget.
+    // GTK4 has no GtkAccelGroup: accelerators are only displayed, from the
+    // "accel" menu item attribute, and wxGTKHandleKeyPress() in window.cpp
+    // activates the items, so nothing is installed on a widget.
     guint GetKey() const { return m_key; }
     GdkModifierType GetMods() const { return m_mods; }
 #else
@@ -117,6 +116,7 @@ static void DoCommonMenuCallbackCode(wxMenu *menu, wxMenuEvent& event)
     wxMenu::ProcessMenuEvent(menu, event, menu->GetWindow());
 }
 
+#ifndef __WXGTK4__
 // Return the top level menu containing this menu (possibly this menu itself).
 static wxMenu* GetRootParentMenu(wxMenu* menu)
 {
@@ -125,6 +125,7 @@ static wxMenu* GetRootParentMenu(wxMenu* menu)
 
     return menu;
 }
+#endif // !__WXGTK4__
 
 #ifdef __WXGTK4__
 
@@ -310,7 +311,6 @@ void wxMenuBar::Init(size_t n, wxMenu *menus[], const wxString titles[], long st
     // Do this before the check below: the dtor unrefs the model unconditionally
     // and creation can fail.
     m_barModel = g_menu_new();
-    m_shortcuts = nullptr;
 
     if (!PreCreation( nullptr, wxDefaultPosition, wxDefaultSize ) ||
         !CreateBase( nullptr, -1, wxDefaultPosition, wxDefaultSize, style, wxDefaultValidator, wxT("menubar") ))
@@ -353,9 +353,9 @@ namespace
 
 // Return the widget the menu actions must be installed on. Named actions are
 // resolved by walking up the widget hierarchy from the widget using them, so
-// this has to be an ancestor of both the menu bar and the shortcut controller,
-// i.e. the TLW: note that the frame may be an MDI child frame, which is a fake
-// frame and not a TLW at all, hence wxGetTopLevelParent().
+// this has to be an ancestor of the menu bar, i.e. the TLW: note that the
+// frame may be an MDI child frame, which is a fake frame and not a TLW at all,
+// hence wxGetTopLevelParent().
 GtkWidget* GetActionTarget(wxWindow* frame)
 {
     wxWindow* const tlw = frame ? wxGetTopLevelParent(frame) : nullptr;
@@ -408,36 +408,6 @@ void wxMenuBar::GTKRebuildModel()
             g_object_unref(empty);
         }
     }
-
-    // The items, and hence their accelerators, may have changed together with
-    // the model, so the shortcuts have to be regenerated as well.
-    GtkWidget* const target = GetActionTarget(m_menuBarFrame);
-    if ( !target )
-        return;
-
-    GTKRemoveShortcuts(target);
-
-#if wxUSE_ACCEL
-    m_shortcuts = gtk_shortcut_controller_new();
-    gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(m_shortcuts),
-                                      GTK_SHORTCUT_SCOPE_GLOBAL);
-    gtk_widget_add_controller(target, m_shortcuts);
-
-    // The widget owns the controller now, so this pointer has to stop
-    // pointing at it if the widget takes it down first: removing a
-    // controller that has already been destroyed is what GTK reports as
-    // "assertion 'GTK_IS_EVENT_CONTROLLER (controller)' failed".
-    g_object_add_weak_pointer(G_OBJECT(m_shortcuts),
-                              reinterpret_cast<gpointer*>(&m_shortcuts));
-
-    for ( wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-          node;
-          node = node->GetNext() )
-    {
-        node->GetData()->
-            GTKAddShortcuts(GTK_SHORTCUT_CONTROLLER(m_shortcuts));
-    }
-#endif // wxUSE_ACCEL
 }
 
 #else // !__WXGTK4__
@@ -636,37 +606,15 @@ void wxMenuBar::Attach(wxFrame *frame)
         }
     }
 
-    // This also registers the shortcuts for our accelerators, which could only
-    // be done once we knew which widget to install them on.
     GTKRebuildModel();
 
     SetLayoutDirection(wxLayout_Default);
-}
-
-// Take the shortcut controller off the widget that has it, if any. Does
-// nothing once the widget has been destroyed, as it took the controller with
-// it and m_shortcuts is null again by then.
-void wxMenuBar::GTKRemoveShortcuts(GtkWidget* target)
-{
-    if ( !m_shortcuts )
-        return;
-
-    GtkEventController* const shortcuts = m_shortcuts;
-
-    // Stop watching before removing: removing is what destroys it.
-    g_object_remove_weak_pointer(G_OBJECT(shortcuts),
-                                 reinterpret_cast<gpointer*>(&m_shortcuts));
-    m_shortcuts = nullptr;
-
-    gtk_widget_remove_controller(target, shortcuts);
 }
 
 void wxMenuBar::Detach()
 {
     if ( GtkWidget* const target = GetActionTarget(m_menuBarFrame) )
     {
-        GTKRemoveShortcuts(target);
-
         for ( wxMenuList::compatibility_iterator node = m_menus.GetFirst();
               node;
               node = node->GetNext() )
@@ -1123,8 +1071,8 @@ void wxMenuItem::SetGtkLabel()
 void wxMenuItem::GTKSetExtraAccels()
 {
     // Nothing to do here: unlike GTK3, which needed each accelerator to be
-    // added to the item widget, GTK4 shortcuts are all (re)created together by
-    // wxMenuBar::GTKRebuildModel() from wxMenuItem::GetExtraAccels().
+    // added to the item widget, GTK4 finds the extra accelerators with
+    // wxMenuBar::FindItemForAccelKey() when the key is pressed.
 }
 
 void wxMenuItem::AddExtraAccel(const wxAcceleratorEntry& accel)
@@ -1144,6 +1092,35 @@ void wxMenuItem::ClearExtraAccels()
 }
 
 #endif // wxUSE_ACCEL
+
+#if defined(__WXGTK4__) && wxUSE_ACCEL
+
+bool wxMenuItem::GTKActivate()
+{
+    if ( !IsEnabled() )
+        return false;
+
+    wxMenu* const menu = GetMenu();
+    if ( !menu || !IsMenuEventAllowed(menu) )
+        return false;
+
+    GSimpleAction* const action = FindItemAction(this);
+    if ( !action )
+        return false;
+
+    // Going through the action rather than sending the event directly keeps
+    // the check and radio state it holds in step, exactly as when the item is
+    // chosen from the menu: the default activation of a stateful action
+    // toggles a boolean state and sets any other one to the parameter.
+    GVariant* const param =
+        m_radioTarget.empty() ? nullptr
+                              : g_variant_new_string(m_radioTarget.utf8_str());
+    g_action_activate(G_ACTION(action), param);
+
+    return true;
+}
+
+#endif // __WXGTK4__ && wxUSE_ACCEL
 
 void wxMenuItem::SetupBitmaps(wxWindow *win)
 {
@@ -1693,16 +1670,6 @@ void wxMenu::GTKRebuildModel()
 
     g_menu_append_section(m_menuModel, nullptr, G_MENU_MODEL(section));
     g_object_unref(section);
-
-    GTKRefreshShortcuts();
-}
-
-void wxMenu::GTKRefreshShortcuts()
-{
-    // Only the menu bar knows the widget the shortcuts are installed on, and
-    // it registers them for all the items of all its menus at once.
-    if ( wxMenuBar* const menubar = GetRootParentMenu(this)->GetMenuBar() )
-        menubar->GTKRebuildModel();
 }
 
 void wxMenu::GTKInstallActions(GtkWidget* widget)
@@ -1726,105 +1693,6 @@ void wxMenu::GTKUninstallActions(GtkWidget* widget)
         if ( wxMenu* const submenu = item->GetSubMenu() )
             submenu->GTKUninstallActions(widget);
     }
-}
-
-namespace
-{
-
-// What a menu accelerator needs to know at the moment its key is pressed.
-// GtkShortcutFunc is not given the event, so the trigger is remembered here
-// alongside the action to activate.
-struct wxMenuShortcut
-{
-    wxMenuShortcut(const wxString& action, int key, int mods)
-        : m_action(action.utf8_str()), m_key(key), m_mods(mods)
-    {
-    }
-
-    const wxCharBuffer m_action;
-    const int m_key;
-    const int m_mods;
-};
-
-void wx_menu_shortcut_free(gpointer data)
-{
-    delete static_cast<wxMenuShortcut*>(data);
-}
-
-// Run the menu item's action, unless the focused window binds this key for
-// itself: GTK4 runs a window shortcut whatever the focused widget does with
-// the key, in every scope it offers, so this is the only place the two can be
-// told apart. See #221.
-gboolean
-wx_menu_shortcut_activate(GtkWidget* widget, GVariant* args, gpointer data)
-{
-    const wxMenuShortcut* const shortcut = static_cast<wxMenuShortcut*>(data);
-
-    if ( wxWindow* const focus = wxWindow::FindFocus() )
-    {
-        if ( focus->GTKShouldPreProcessKey(shortcut->m_key, shortcut->m_mods) )
-            return FALSE;
-    }
-
-    return gtk_widget_activate_action_variant(widget, shortcut->m_action, args);
-}
-
-} // anonymous namespace
-
-void wxMenu::GTKAddShortcuts(GtkShortcutController* controller)
-{
-#if wxUSE_ACCEL
-    for ( auto* item : m_items )
-    {
-        if ( wxMenu* const submenu = item->GetSubMenu() )
-        {
-            submenu->GTKAddShortcuts(controller);
-            continue;
-        }
-
-        if ( item->GTKGetActionName().empty() )
-            continue;
-
-        const wxString fullName = m_actionPrefix + "." + item->GTKGetActionName();
-        const wxString& target = item->GTKGetRadioTarget();
-
-        // Collect the item's own accelerator, if any, and all its extra ones.
-        wxVector<GtkAccel> accels;
-
-        const GtkAccel accel(item);
-        if ( accel.IsOk() )
-            accels.push_back(accel);
-
-        for ( const auto& extra : item->GetExtraAccels() )
-        {
-            const GtkAccel extraAccel(extra);
-            if ( extraAccel.IsOk() )
-                accels.push_back(extraAccel);
-        }
-
-        for ( const auto& a : accels )
-        {
-            GtkShortcut* const shortcut =
-                gtk_shortcut_new(gtk_keyval_trigger_new(a.GetKey(), a.GetMods()),
-                                 gtk_callback_action_new(
-                                     wx_menu_shortcut_activate,
-                                     new wxMenuShortcut(fullName,
-                                                        a.GetKey(),
-                                                        a.GetMods()),
-                                     wx_menu_shortcut_free));
-
-            if ( !target.empty() )
-            {
-                gtk_shortcut_set_arguments(
-                    shortcut, g_variant_new_string(target.utf8_str()));
-            }
-
-            gtk_shortcut_controller_add_shortcut(controller, shortcut);
-        }
-    }
-#else // !wxUSE_ACCEL
-    wxUnusedVar(controller);
-#endif // wxUSE_ACCEL/!wxUSE_ACCEL
 }
 
 void wxMenu::GTKOnRadioSelected(const char* actionName, const wxString& target)

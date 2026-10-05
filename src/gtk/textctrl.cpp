@@ -3516,15 +3516,6 @@ bool wxTextCtrl::GTKProcessEvent(wxEvent& event) const
     return rc && (IsSingleLine() || event.GetEventType() != wxEVT_LEFT_UP);
 }
 
-#ifdef __WXGTK4__
-
-bool wxTextCtrl::GTKShouldPreProcessKey(int keyval, int modifiers) const
-{
-    return GTKEntryWantsKey(IsEditable(), keyval, modifiers);
-}
-
-#endif // __WXGTK4__
-
 // static
 wxVisualAttributes
 wxTextCtrl::GetClassDefaultAttributes(wxWindowVariant WXUNUSED(variant))

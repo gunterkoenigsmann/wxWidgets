@@ -1647,14 +1647,11 @@ bool wxTopLevelWindowGTK::Create( wxWindow *parent,
     g_signal_connect (m_widget, "notify::is-active",
                       G_CALLBACK (wxgtk_tlw_notify_is_active), this);
 
-    // Note that GTK3's key_press_event handler, which reversed GTK's order so
+    // GTK3's key_press_event handler below, which reversed GTK's order so
     // that the focused child saw a key before the menu accelerators did, has
-    // no GTK4 equivalent and needs none: accelerators are now shortcuts held
-    // by a GtkShortcutController on this window, and a controller on an
-    // ancestor runs in the bubble phase, i.e. after the focused widget's own
-    // controllers. The wx order therefore falls out of the dispatch model
-    // rather than having to be imposed on it -- though, like everything else
-    // in this port, that is not runtime-verified yet.
+    // no GTK4 counterpart: GTK4 has nothing that activates the accelerators,
+    // so wxGTKHandleKeyPress() in window.cpp does it once the focused window
+    // has seen the key.
 #else // !__WXGTK4__
     // for some reported size corrections
     g_signal_connect (m_widget, "map_event",
