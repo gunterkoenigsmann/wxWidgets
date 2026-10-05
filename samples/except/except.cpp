@@ -483,7 +483,8 @@ bool MyFrame::ProcessEvent(wxEvent& event)
     }
     catch ( const char *msg )
     {
-        wxLogMessage("Caught a string \"%s\" in MyFrame", msg);
+        wxLogMessage("Caught a string \"%s\" in MyFrame",
+                     wxString::FromUTF8(msg));
 
         return true;
     }
@@ -675,4 +676,3 @@ void MyDialog::OnCrash(wxCommandEvent& WXUNUSED(event))
 {
     DoCrash();
 }
-

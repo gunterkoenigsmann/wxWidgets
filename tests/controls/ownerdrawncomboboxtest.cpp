@@ -174,4 +174,30 @@ TEST_CASE_METHOD(OwnerDrawnComboBoxTestCase, "OwnerDrawnComboBox::ReadOnly",
     CHECK(m_combo->GetValue() == "item 2");
 }
 
+TEST_CASE("wxOwnerDrawnComboBox::ProcessEnter",
+          "[wxOwnerDrawnComboBox][enter]")
+{
+    // This control is generic on every platform, and the code under it --
+    // wxComboCtrl forwarding its text control's events -- is shared too, so
+    // this is deliberately not conditional on the toolkit. It exists because
+    // nothing exercised wxComboCtrl with wxTE_PROCESS_ENTER in a dialog:
+    // OnTextCtrlEvent() reported every such event as handled, which left
+    // wxTextCtrl::OnChar() unable to activate the dialog's default button.
+    class OwnerDrawnComboBoxCreator : public TextLikeControlCreator
+    {
+    public:
+        virtual wxControl* Create(wxWindow* parent, int style) const override
+        {
+            const wxString choices[] = { "foo", "bar", "baz" };
+
+            return new wxOwnerDrawnComboBox(parent, wxID_ANY, wxString(),
+                                            wxDefaultPosition, wxDefaultSize,
+                                            WXSIZEOF(choices), choices,
+                                            style);
+        }
+    };
+
+    TestProcessEnter(OwnerDrawnComboBoxCreator());
+}
+
 #endif // wxUSE_ODCOMBOBOX

@@ -19,7 +19,10 @@
     #include "wx/wx.h"
 #endif // WX_PRECOMP
 
+#include "wx/combobox.h"
 #include "wx/menu.h"
+#include "wx/spinctrl.h"
+#include "wx/srchctrl.h"
 #include "wx/translation.h"
 #include "wx/uiaction.h"
 
@@ -86,8 +89,15 @@ public:
     MenuTestCase() { CreateFrame(); }
     ~MenuTestCase() { m_frame->Destroy(); }
 
+#ifdef __WXGTK4__
+    // Bound by the Menu::UpdateUIFromIdle case below, which is its own class
+    // deriving from this one, so this cannot be protected.
+    void OnUpdateBar(wxUpdateUIEvent& event);
+#endif // __WXGTK4__
+
 protected:
     void CreateFrame();
+
 
     wxFrame* m_frame;
 
@@ -399,6 +409,27 @@ TEST_CASE_METHOD(MenuTestCase, "Menu::Labels", "[menu]")
     CHECK( wxMenuItem::GetLabelText("&Foo\tCtrl-F") == "Foo" );
 }
 
+#ifdef __WXGTK4__
+
+TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIFromIdle", "[menu]")
+{
+    m_frame->Bind(wxEVT_UPDATE_UI, &MenuTestCase::OnUpdateBar, this,
+                  MenuTestCase_Bar);
+
+    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
+    CHECK( !m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+
+    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
+    CHECK( m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+}
+
+void MenuTestCase::OnUpdateBar(wxUpdateUIEvent& event)
+{
+    event.Enable(!m_menuWithBar->IsEnabled(MenuTestCase_Bar));
+}
+
+#endif // __WXGTK4__
+
 #if wxUSE_INTL
 
 static wxString
@@ -588,6 +619,13 @@ public:
         return m_event != nullptr;
     }
 
+    // Throw away whatever was received, so that the next check starts clean.
+    void Clear()
+    {
+        delete m_event;
+        m_event = nullptr;
+    }
+
 private:
     void OnMenu(wxCommandEvent& event)
     {
@@ -676,6 +714,49 @@ TEST_CASE_METHOD(MenuTestCase, "Menu::Events", "[menu]")
     wxYield();
 
     CHECK( !handler.GotEvent() );
+
+    handler.Clear();
+    text->Destroy();
+    wxYield();
+
+    // The other controls embedding an editable text field bind this key for
+    // themselves too, so the accelerator has to lose to each of them as well.
+    // They are checked one at a time, so a failure names the control rather
+    // than only the key.
+    struct EditableControl
+    {
+        const char* name;
+        wxWindow* win;
+    };
+
+    const EditableControl editable[] =
+    {
+#if wxUSE_COMBOBOX
+        { "wxComboBox", new wxComboBox(m_frame, wxID_ANY, "Testing") },
+#endif
+#if wxUSE_SEARCHCTRL
+        { "wxSearchCtrl", new wxSearchCtrl(m_frame, wxID_ANY, "Testing") },
+#endif
+#if wxUSE_SPINCTRL
+        { "wxSpinCtrl", new wxSpinCtrl(m_frame, wxID_ANY, "17") },
+#endif
+    };
+
+    for ( const EditableControl& c : editable )
+    {
+        c.win->SetFocus();
+        wxYield();
+
+        sim.Char('A', wxMOD_CONTROL);
+        wxYield();
+
+        INFO("Accelerator fired while " << c.name << " had the focus");
+        CHECK( !handler.GotEvent() );
+
+        handler.Clear();
+        c.win->Destroy();
+        wxYield();
+    }
 #endif // wxUSE_UIACTIONSIMULATOR
 }
 
