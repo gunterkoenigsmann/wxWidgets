@@ -611,14 +611,20 @@ wxRendererQt::DrawItemSelectionRect(wxWindow* win, wxDC& dc, const wxRect& rect,
     option.rect = wxQtConvertRect(rect);
 
     // Added to what initFrom() set rather than replacing it: a style may draw
-    // nothing for an item that is not also enabled.
+    // nothing for an item that is not also enabled. The focus is not this
+    // function's to draw, though: DrawFocusRect() does that.
+    option.state &= ~QStyle::State_HasFocus;
     if ( flags & wxCONTROL_SELECTED )
     {
         option.state |= QStyle::State_Selected;
         option.showDecorationSelected = true;
     }
 
-    qtStyle->drawPrimitive(QStyle::PE_PanelItemViewItem, &option, painter, qtWidget);
+    // The whole item rather than PE_PanelItemViewItem, its background: the
+    // Windows 11 style, the default one since Qt 6.7, paints only the item's
+    // background brush there and the selection in CE_ItemViewItem. The item
+    // has no text, icon or check box, so the selection is all it draws.
+    qtStyle->drawControl(QStyle::CE_ItemViewItem, &option, painter, qtWidget);
 }
 
 void
