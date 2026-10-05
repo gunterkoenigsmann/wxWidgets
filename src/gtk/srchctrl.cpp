@@ -412,6 +412,21 @@ void wxSearchCtrl::PopupSearchMenu()
 
 #endif // wxUSE_MENUS
 
+#if wxUSE_ACCEL
+
+bool
+wxSearchCtrl::ClaimsKeyBeforeAccelerator(const wxKeyEvent& event,
+                                         int WXUNUSED(command)) const
+{
+    // A read-only control has no text to edit and so no keys to keep.
+    if ( !IsEditable() )
+        return false;
+
+    return IsUsedForEditing(event);
+}
+
+#endif // wxUSE_ACCEL
+
 wxSize wxSearchCtrl::DoGetBestSize() const
 {
     return DoGetSizeFromTextSize(GetCharWidth() * 8);

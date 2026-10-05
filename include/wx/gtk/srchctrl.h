@@ -107,6 +107,12 @@ private:
 #endif // __WXGTK4__
 
 protected:
+#if wxUSE_ACCEL
+    // Reserve the keys used for editing the text in this control.
+    virtual bool ClaimsKeyBeforeAccelerator(const wxKeyEvent& event,
+                                            int command) const override;
+#endif // wxUSE_ACCEL
+
     virtual wxSize DoGetBestSize() const override;
     virtual wxSize DoGetSizeFromTextSize(int xlen, int ylen = -1) const override;
 #ifndef __WXGTK4__
