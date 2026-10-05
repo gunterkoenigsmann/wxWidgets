@@ -218,6 +218,12 @@ public:
 #endif // __WXGTK4__
 
 protected:
+#if wxUSE_ACCEL
+    // Reserve the keys used for editing the text in this control.
+    virtual bool ClaimsKeyBeforeAccelerator(const wxKeyEvent& event,
+                                            int command) const override;
+#endif // wxUSE_ACCEL
+
     // From wxWindowGTK:
 #ifndef __WXGTK4__
     virtual GdkWindow *GTKGetWindow(wxArrayGdkWindows& windows) const override;

@@ -16,6 +16,7 @@
 #include "wx/ribbon/art.h"
 #include "wx/ribbon/bar.h"
 #include "wx/dcbuffer.h"
+#include "wx/renderer.h"
 
 #ifndef WX_PRECOMP
 #endif
@@ -340,6 +341,7 @@ void wxRibbonToolBar::ClearTools()
 
     m_hover_tool = nullptr;
     m_active_tool = nullptr;
+    m_focused_tool = nullptr;
     m_keyTips.clear();
     m_dropdownKeyTips.clear();
 
@@ -365,6 +367,8 @@ bool wxRibbonToolBar::DeleteTool(int tool_id)
                     m_hover_tool = nullptr;
                 if ( tool == m_active_tool )
                     m_active_tool = nullptr;
+                if ( tool == m_focused_tool )
+                    m_focused_tool = nullptr;
                 delete tool;
                 m_keyTips.erase(tool_id);
                 m_dropdownKeyTips.erase(tool_id);
@@ -438,6 +442,104 @@ void wxRibbonToolBar::ActivateTool(wxRibbonToolBarToolBase* tool, bool dropdown)
     Refresh(false);
 }
 
+std::vector<wxRibbonToolBarToolBase*> wxRibbonToolBar::GetEnabledTools() const
+{
+    std::vector<wxRibbonToolBarToolBase*> tools;
+    for ( size_t g = 0; g < m_groups.GetCount(); ++g )
+    {
+        wxRibbonToolBarToolGroup* group = m_groups.Item(g);
+        for ( size_t t = 0; t < group->tools.GetCount(); ++t )
+        {
+            wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+            if ( !(tool->state & wxRIBBON_TOOLBAR_TOOL_DISABLED) )
+                tools.push_back(tool);
+        }
+    }
+    return tools;
+}
+
+bool wxRibbonToolBar::HasFocusableItems() const
+{
+    return !GetEnabledTools().empty();
+}
+
+bool wxRibbonToolBar::FocusFirstItem()
+{
+    const std::vector<wxRibbonToolBarToolBase*> tools = GetEnabledTools();
+    if ( tools.empty() )
+        return false;
+
+    DoFocusTool(tools.front());
+    return true;
+}
+
+bool wxRibbonToolBar::FocusLastItem()
+{
+    const std::vector<wxRibbonToolBarToolBase*> tools = GetEnabledTools();
+    if ( tools.empty() )
+        return false;
+
+    DoFocusTool(tools.back());
+    return true;
+}
+
+bool wxRibbonToolBar::FocusNextItem(bool forward)
+{
+    const std::vector<wxRibbonToolBarToolBase*> tools = GetEnabledTools();
+    if ( tools.empty() )
+        return false;
+
+    size_t pos{ 0 };
+    while ( pos < tools.size() && tools[pos] != m_focused_tool )
+        ++pos;
+
+    if ( pos == tools.size() )
+        return forward ? FocusFirstItem() : FocusLastItem();
+
+    if ( forward ? (pos + 1 == tools.size()) : (pos == 0) )
+        return false;
+
+    DoFocusTool(tools[forward ? pos + 1 : pos - 1]);
+    return true;
+}
+
+void wxRibbonToolBar::DoFocusTool(wxRibbonToolBarToolBase* tool)
+{
+    m_focused_tool = tool;
+    Refresh(false);
+
+#if wxUSE_ACCESSIBILITY
+    const int pos = GetToolPos(tool->id);
+    if ( pos != wxNOT_FOUND )
+    {
+        wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_FOCUS, this, wxOBJID_CLIENT, pos + 1);
+    }
+#endif // wxUSE_ACCESSIBILITY
+}
+
+void wxRibbonToolBar::ClearFocusedItem()
+{
+    if ( m_focused_tool != nullptr )
+    {
+        m_focused_tool = nullptr;
+        Refresh(false);
+    }
+}
+
+void wxRibbonToolBar::ActivateFocusedItem(bool dropdown)
+{
+    wxRibbonToolBarToolBase* tool = m_focused_tool;
+    if ( tool == nullptr )
+        return;
+
+    // Only tools with a dropdown have something to open.
+    if ( dropdown && tool->kind != wxRIBBON_BUTTON_DROPDOWN &&
+         tool->kind != wxRIBBON_BUTTON_HYBRID )
+        return;
+
+    ActivateTool(tool, dropdown);
+}
+
 bool wxRibbonToolBar::DeleteToolByPos(size_t pos)
 {
     size_t group_count = m_groups.GetCount();
@@ -455,6 +557,8 @@ bool wxRibbonToolBar::DeleteToolByPos(size_t pos)
                 m_hover_tool = nullptr;
             if ( tool == m_active_tool )
                 m_active_tool = nullptr;
+            if ( tool == m_focused_tool )
+                m_focused_tool = nullptr;
             m_keyTips.erase(tool->id);
             m_dropdownKeyTips.erase(tool->id);
             delete tool;
@@ -1174,7 +1278,24 @@ void wxRibbonToolBar::OnPaint(wxPaintEvent& WXUNUSED(evt))
                     bmp = tool->bitmap_disabled.GetBitmapFor(this);
                 else
                     bmp = tool->bitmap.GetBitmapFor(this);
-                m_art->DrawTool(dc, this, rect, bmp, tool->kind, tool->state);
+
+                // Show the tool with the keyboard focus as hovered, and mark it too.
+                long state{ tool->state };
+                const bool focused{ (tool == m_focused_tool) };
+                if ( focused )
+                {
+                    state |= (tool->kind == wxRIBBON_BUTTON_DROPDOWN)
+                                ? wxRIBBON_TOOLBAR_TOOL_DROPDOWN_HOVERED
+                                : wxRIBBON_TOOLBAR_TOOL_NORMAL_HOVERED;
+                }
+
+                m_art->DrawTool(dc, this, rect, bmp, tool->kind, state);
+
+                if ( focused )
+                {
+                    rect.Deflate(FromDIP(2));
+                    wxRendererNative::Get().DrawFocusRect(this, dc, rect);
+                }
             }
         }
     }
@@ -1391,5 +1512,190 @@ bool wxRibbonToolBarEvent::PopupMenu(wxMenu* menu)
     }
     return m_bar->PopupMenu(menu, pos);
 }
+
+#if wxUSE_ACCESSIBILITY
+
+class wxRibbonToolBarAccessible : public wxWindowAccessible
+{
+public:
+    explicit wxRibbonToolBarAccessible(wxRibbonToolBar* bar) : wxWindowAccessible(bar) { }
+
+    wxAccStatus GetChildCount(int* childCount) override
+    {
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        *childCount = static_cast<int>(bar->GetToolCount());
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetChild(int childId, wxAccessible** child) override
+    {
+        *child = (childId == wxACC_SELF) ? this : nullptr;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetRole(int childId, wxAccRole* role) override
+    {
+        if ( childId == wxACC_SELF )
+        {
+            *role = wxROLE_SYSTEM_TOOLBAR;
+            return wxACC_OK;
+        }
+
+        wxRibbonToolBarToolBase* tool = GetTool(childId);
+        if ( tool == nullptr )
+        {
+            *role = wxROLE_SYSTEM_SEPARATOR;
+            return wxACC_OK;
+        }
+
+        if ( tool->kind == wxRIBBON_BUTTON_TOGGLE )
+            *role = wxROLE_SYSTEM_CHECKBUTTON;
+        else if ( tool->kind & wxRIBBON_BUTTON_DROPDOWN )
+            *role = wxROLE_SYSTEM_BUTTONDROPDOWN;
+        else
+            *role = wxROLE_SYSTEM_PUSHBUTTON;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetState(int childId, long* state) override
+    {
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId == wxACC_SELF )
+        {
+            long st = 0;
+            if ( !bar->IsEnabled() )
+                st |= wxACC_STATE_SYSTEM_UNAVAILABLE;
+            if ( !bar->IsShownOnScreen() )
+                st |= wxACC_STATE_SYSTEM_INVISIBLE;
+            *state = st;
+            return wxACC_OK;
+        }
+
+        wxRibbonToolBarToolBase* tool = GetTool(childId);
+        if ( tool == nullptr )
+        {
+            *state = 0;
+            return wxACC_OK;
+        }
+
+        long st{ 0 };
+        if ( tool->state & wxRIBBON_TOOLBAR_TOOL_DISABLED )
+            st |= wxACC_STATE_SYSTEM_UNAVAILABLE;
+        else
+            st |= wxACC_STATE_SYSTEM_FOCUSABLE;
+        if ( tool->state & wxRIBBON_TOOLBAR_TOOL_TOGGLED )
+            st |= wxACC_STATE_SYSTEM_CHECKED;
+        if ( tool->state & wxRIBBON_TOOLBAR_TOOL_ACTIVE_MASK )
+            st |= wxACC_STATE_SYSTEM_PRESSED;
+
+        wxRibbonBar* ribbonBar = bar->GetAncestorRibbonBar();
+        if ( bar->m_focused_tool == tool && ribbonBar && ribbonBar->HasFocus() )
+            st |= wxACC_STATE_SYSTEM_FOCUSED;
+
+        *state = st;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetName(int childId, wxString* name) override
+    {
+        if ( childId == wxACC_SELF )
+            return wxWindowAccessible::GetName(childId, name);
+
+        wxRibbonToolBarToolBase* tool = GetTool(childId);
+        if ( tool == nullptr )
+            return wxACC_OK; // A separator has no name.
+
+        *name = wxStripMenuCodes(tool->help_string, wxStrip_Mnemonics);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetLocation(wxRect& rect, int elementId) override
+    {
+        if ( elementId == wxACC_SELF )
+            return wxWindowAccessible::GetLocation(rect, elementId);
+
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        wxRibbonToolBarToolBase* tool = GetTool(elementId);
+        if ( tool == nullptr )
+            return wxACC_NOT_IMPLEMENTED; // A separator isn't clickable.
+
+        rect = bar->GetToolRect(tool->id);
+        rect.SetPosition(bar->ClientToScreen(rect.GetPosition()));
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetDefaultAction(int childId, wxString* actionName) override
+    {
+        if ( childId == wxACC_SELF || !GetTool(childId) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        *actionName = _("Press");
+        return wxACC_OK;
+    }
+
+    wxAccStatus DoDefaultAction(int childId) override
+    {
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        wxRibbonToolBarToolBase* tool = GetTool(childId);
+        if ( tool == nullptr )
+            return wxACC_NOT_IMPLEMENTED;
+
+        bar->ActivateTool(tool);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetFocus(int* childId, wxAccessible** child) override
+    {
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        const int pos = bar->m_focused_tool
+            ? bar->GetToolPos(bar->m_focused_tool->id) : wxNOT_FOUND;
+        if ( pos == wxNOT_FOUND )
+        {
+            *childId = wxACC_SELF;
+            *child = this;
+        }
+        else
+        {
+            *childId = pos + 1;
+            *child = nullptr;
+        }
+        return wxACC_OK;
+    }
+
+private:
+    wxRibbonToolBarToolBase* GetTool(int childId)
+    {
+        if ( childId <= 0 )
+            return nullptr;
+
+        wxRibbonToolBar* bar = wxDynamicCast(GetWindow(), wxRibbonToolBar);
+        if ( bar == nullptr )
+            return nullptr;
+
+        return bar->GetToolByPos(static_cast<size_t>(childId - 1));
+    }
+};
+
+wxAccessible* wxRibbonToolBar::CreateAccessible()
+{
+    return new wxRibbonToolBarAccessible(this);
+}
+
+#endif // wxUSE_ACCESSIBILITY
 
 #endif // wxUSE_RIBBON

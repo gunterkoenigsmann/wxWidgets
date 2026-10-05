@@ -253,9 +253,9 @@ WXDWORD wxNotebook::MSWGetStyle(long style, WXDWORD *exstyle) const
     return tabStyle;
 }
 
-void wxNotebook::MSWSetDarkOrLightMode(SetMode setmode)
+void wxNotebook::MSWSetDarkOrLightMode()
 {
-    wxNotebookBase::MSWSetDarkOrLightMode(setmode);
+    wxNotebookBase::MSWSetDarkOrLightMode();
 
     // Background must always be set, unless there is a custom colour.
     if ( !m_hasBgCol )
@@ -1107,10 +1107,16 @@ DrawNotebookTab(wxDC& dc,
             }
         }
 
+        // Check if mouse is over the tab.
         if ( flags & wxCONTROL_CURRENT )
-            colTab = wxSystemSettings::GetColour(wxSYS_COLOUR_HOTLIGHT);
+        {
+            // Draw background slightly lighter, like Windows 11 Explorer.
+            colTab = dc.GetBackground().GetColour().ChangeLightness(110);
+        }
         else
+        {
             colTab = wxSystemSettings::GetColour(wxSYS_COLOUR_BTNSHADOW);
+        }
     }
 
     dc.SetBrush(colTab);

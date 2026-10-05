@@ -894,8 +894,9 @@ TDRadioButtonSubclassProc(HWND hwnd,
 
                 ::DefSubclassProc(hwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdcBuf), PRF_CLIENT);
 
-                wchar_t text[512] = {};
-                GetWindowTextW(hwnd, text, static_cast<int>(std::size(text)));
+                const size_t textSize = 512;
+                wchar_t text[textSize] = {};
+                GetWindowTextW(hwnd, text, static_cast<int>(textSize));
 
                 auto gs = hBtn.GetTrueSize(BP_RADIOBUTTON, RBS_UNCHECKEDNORMAL);
                 RECT rcText = { gs.x + 2, 0, rcClient.right, rcClient.bottom };
@@ -934,6 +935,41 @@ TDRadioButtonSubclassProc(HWND hwnd,
 // Attachment helpers
 // ============================================================================
 
+// Helper checking if the window is already subclassed.
+//
+// This is a wrapper around ::GetWindowSubclass() which loads it dynamically
+// because this function is not exported by name from comctl32.dll v5 and even
+// if we already don't support using that version, we could still be linking
+// with it, notably when linking a console application not using any manifest.
+bool
+IsWindowSubclassed(HWND hwnd, SUBCLASSPROC proc, UINT_PTR uId)
+{
+    DWORD_PTR dwRef = 0;
+
+    typedef BOOL
+        (WINAPI *GetWindowSubclass_t)(HWND,SUBCLASSPROC,UINT_PTR,DWORD_PTR*);
+
+    static GetWindowSubclass_t s_pfnGetWindowSubclass = nullptr;
+    if ( !s_pfnGetWindowSubclass )
+    {
+        wxLoadedDLL dll(wxS("comctl32.dll"));
+
+        // Note that we import it by name here but this is fine because v6 does
+        // export it by name and if we're running this GUI code, we must be
+        // using v6, it's only binding statically when using v5 that fails.
+        wxDL_INIT_FUNC(s_pfn, GetWindowSubclass, dll);
+
+        if ( !s_pfnGetWindowSubclass )
+        {
+            // This is really not supposed to happen but don't crash if it does.
+            wxLogLastError("GetProcAddress(GetWindowSubclass)");
+            return false;
+        }
+    }
+
+    return s_pfnGetWindowSubclass(hwnd, proc, uId, &dwRef) != FALSE;
+}
+
 // Helper which calls SetWindowSubclass() only if the subclass is not already
 // set.
 //
@@ -947,11 +983,10 @@ SetWindowSubclassIfNeeded(HWND hwnd,
                            UINT_PTR uId,
                            InitFunc initFunc)
 {
-    DWORD_PTR dwRef = 0;
-    if ( ::GetWindowSubclass(hwnd, proc, uId, &dwRef) )
+    if ( IsWindowSubclassed(hwnd, proc, uId) )
         return;
 
-    dwRef = static_cast<DWORD_PTR>(initFunc());
+    DWORD_PTR dwRef = static_cast<DWORD_PTR>(initFunc());
     if ( !::SetWindowSubclass(hwnd, proc, uId, dwRef) )
     {
         wxLogLastError("SetWindowSubclass");
@@ -973,8 +1008,7 @@ SetWindowSubclassIfNeeded(HWND hwnd,
 // Return false if it wasn't.
 bool RemoveWindowSubclassIfNeeded(HWND hwnd, SUBCLASSPROC proc, UINT_PTR uId)
 {
-    DWORD_PTR dwRef = 0;
-    if ( !::GetWindowSubclass(hwnd, proc, uId, &dwRef) )
+    if ( !IsWindowSubclassed(hwnd, proc, uId) )
         return false;
 
     if ( !::RemoveWindowSubclass(hwnd, proc, uId) )

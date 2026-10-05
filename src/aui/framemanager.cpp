@@ -769,6 +769,14 @@ bool wxAuiManager::CanDockPanel(const wxAuiPaneInfo & WXUNUSED(p))
     return !(wxGetKeyState(WXK_CONTROL) || wxGetKeyState(WXK_ALT));
 }
 
+bool wxAuiManager::CanAddPane(wxWindow* window,
+                              const wxAuiPaneInfo& WXUNUSED(paneInfo)) const
+{
+    wxCHECK_MSG(window, false, wxT("null window ptrs are not allowed"));
+
+    return true;
+}
+
 // GetPane() looks up a wxAuiPaneInfo structure based
 // on the supplied window pointer.  Upon failure, GetPane()
 // returns an empty wxAuiPaneInfo, a condition which can be checked
@@ -1081,10 +1089,7 @@ void wxAuiManager::SetArtProvider(wxAuiDockArt* art_provider)
 
 bool wxAuiManager::AddPane(wxWindow* window, const wxAuiPaneInfo& paneInfo)
 {
-    wxASSERT_MSG(window, wxT("null window ptrs are not allowed"));
-
-    // check if the pane has a valid window
-    if (!window)
+    if ( !CanAddPane(window, paneInfo) )
         return false;
 
     // check if the window is already managed by us
@@ -1251,6 +1256,10 @@ bool wxAuiManager::InsertPane(wxWindow* window, const wxAuiPaneInfo& paneInfo,
 {
     wxASSERT_MSG(window, wxT("null window ptrs are not allowed"));
 
+    wxAuiPaneInfo& existing_pane = GetPane(window);
+    if ( !existing_pane.IsOk() && !CanAddPane(window, paneInfo) )
+        return false;
+
     // shift the panes around, depending on the insert level
     switch (insert_level)
     {
@@ -1276,7 +1285,6 @@ bool wxAuiManager::InsertPane(wxWindow* window, const wxAuiPaneInfo& paneInfo,
 
     // if the window already exists, we are basically just moving/inserting the
     // existing window.  If it doesn't exist, we need to add it and insert it
-    wxAuiPaneInfo& existing_pane = GetPane(window);
     if (!existing_pane.IsOk())
     {
         return AddPane(window, paneInfo);
@@ -1509,16 +1517,7 @@ bool wxAuiManager::DetachPane(wxWindow* window)
                 if (p.frame->IsShown())
                     p.frame->Show(false);
 
-                // reparent to m_frame and destroy the pane
-                if (m_actionWindow == p.frame)
-                {
-                    m_actionWindow = nullptr;
-                }
-
-                p.window->Reparent(m_frame);
-                p.frame->SetSizer(nullptr);
-                p.frame->Destroy();
-                p.frame = nullptr;
+                DestroyFloatingFrame(p);
             }
 
             // make sure there are no references to this pane in our uiparts,
@@ -1589,9 +1588,20 @@ void wxAuiManager::DoHidePaneWindow(wxAuiPaneInfo& paneInfo)
     // if we have a frame, destroy it
     if (paneInfo.frame)
     {
-        paneInfo.frame->Destroy();
-        paneInfo.frame = nullptr;
+        DestroyFloatingFrame(paneInfo);
     }
+}
+
+void wxAuiManager::DestroyFloatingFrame(wxAuiPaneInfo& paneInfo)
+{
+    wxCHECK_RET( paneInfo.frame, "no floating frame to destroy" );
+
+    if (paneInfo.window && paneInfo.window->GetParent() != m_frame)
+        paneInfo.window->Reparent(m_frame);
+
+    // wxAuiFloatingFrame::Destroy() removes the pane window from its sizer.
+    paneInfo.frame->Destroy();
+    paneInfo.frame = nullptr;
 }
 
 void wxAuiManager::ClosePane(wxAuiPaneInfo& paneInfo)
@@ -3277,11 +3287,7 @@ void wxAuiManager::Update()
             if (p.frame->IsShown())
                 p.frame->Show(false);
 
-            // reparent to m_frame and destroy the pane
-            p.window->Reparent(m_frame);
-            p.frame->SetSizer(nullptr);
-            p.frame->Destroy();
-            p.frame = nullptr;
+            DestroyFloatingFrame(p);
         }
     }
 

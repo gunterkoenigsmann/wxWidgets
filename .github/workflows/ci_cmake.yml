@@ -78,8 +78,8 @@ jobs:
             cmake_samples: ALL
             cmake_build_toolkit: gtk4
             gtk_version: 4
-          - name: macOS 14 wxOSX Xcode
-            runner: macos-14
+          - name: macOS 15 wxOSX Xcode
+            runner: macos-15
             cmake_generator: Xcode
             cmake_defines: -DCMAKE_OSX_DEPLOYMENT_TARGET="10.13"
             cmake_build_toolkit: osx_cocoa
@@ -96,8 +96,8 @@ jobs:
             cmake_samples: SOME
             cmake_tests: OFF
             cmake_build_toolkit: gtk3
-          - name: macOS 14 wxIOS
-            runner: macos-14
+          - name: macOS 15 wxIOS
+            runner: macos-15
             cmake_generator: Xcode
             cmake_defines: -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_FIND_ROOT_PATH=/usr/local -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
             cmake_samples: OFF

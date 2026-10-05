@@ -2012,8 +2012,11 @@ public:
     wxRect m_tab_rect;
     wxAuiTabCtrl* const m_tabs;
     int m_tabCtrlHeight = 0;
+
+    wxDECLARE_CLASS(wxAuiTabFrame);
 };
 
+wxIMPLEMENT_CLASS(wxAuiTabFrame, wxWindow);
 
 const int wxAuiBaseTabCtrlId = 5380;
 
@@ -2058,6 +2061,22 @@ bool IsDummyPane(const wxAuiPaneInfo& pane)
 }
 
 } // anonymous namespace
+
+bool wxAuiNotebook::wxAuiNotebookManager::CanAddPane(
+    wxWindow* window, const wxAuiPaneInfo& paneInfo) const
+{
+    if ( !wxAuiManager::CanAddPane(window, paneInfo) )
+        return false;
+
+    // wxAuiNotebook creates a hidden dummy pane before any real tab frames.
+    if ( IsDummyPane(paneInfo) && m_panes.empty() )
+        return true;
+
+    wxCHECK_MSG(wxDynamicCast(window, wxAuiTabFrame), false,
+                wxT("Can't add non-tab panes to wxAuiNotebook's manager"));
+
+    return true;
+}
 
 void wxAuiNotebook::OnSysColourChanged(wxSysColourChangedEvent &event)
 {
@@ -3596,18 +3615,36 @@ void wxAuiNotebook::OnChildFocusNotebook(wxChildFocusEvent& evt)
     }
 
 
-    // find the page containing the focused child
-    wxWindow* win = evt.GetWindow();
-    while ( win )
+    const auto findPageFromWindow = [this](wxWindow* win) -> wxWindow*
     {
-        // pages have the notebook as the parent, so stop when we reach one
-        // (and also stop in the impossible case of no parent at all)
-        wxWindow* const parent = win->GetParent();
-        if ( !parent || parent == this )
-            break;
+        while ( win )
+        {
+            // pages have the notebook as the parent, so stop when we reach one
+            // (and also stop in the impossible case of no parent at all)
+            wxWindow* const parent = win->GetParent();
+            if ( !parent )
+                return nullptr;
 
-        win = parent;
-    }
+            if ( parent == this )
+                return win;
+
+            win = parent;
+        }
+
+        return nullptr;
+    };
+
+    // Prefer the actual current focus: this event can be delayed and refer to a
+    // page whose handler has already selected another page.
+    wxWindow* win = findPageFromWindow(wxWindow::FindFocus());
+
+    // But if we couldn't find the page containing the focus, use the window
+    // that generated the event.
+    if ( !win )
+        win = findPageFromWindow(evt.GetWindow());
+
+    if ( !win )
+        return;
 
     // change the tab selection to this page
     int idx = m_tabs.GetIdxFromWindow(win);

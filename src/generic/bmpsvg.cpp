@@ -28,6 +28,8 @@
     #include "wx/utils.h"                   // Only for wxMin()
 #endif
 
+#include "wx/filename.h"
+
 #if wxUSE_FFILE
     #include "wx/ffile.h"
 #elif wxUSE_FILE
@@ -37,6 +39,15 @@
 #endif
 
 #include "wx/rawbmp.h"
+
+#if wxUSE_STREAMS
+    #include "wx/mstream.h"
+#endif // wxUSE_STREAMS
+
+#if wxUSE_ZLIB && wxUSE_STREAMS
+    #include "wx/wfstream.h"
+    #include "wx/zstream.h"
+#endif // wxUSE_ZLIB && wxUSE_STREAMS
 
 // ============================================================================
 // private helpers
@@ -255,11 +266,7 @@ private:
 // these headers with errors about ambiguous operator==(char,enum).
 
 // Disable some warnings inside NanoSVG code that we're not interested in.
-#ifdef __VISUALC__
-    #pragma warning(push)
-    #pragma warning(disable:4456)
-    #pragma warning(disable:4702)
-#endif
+wxMSVC_WARNING_SUPPRESS(4456 4702)
 
 wxGCC_WARNING_SUPPRESS(cast-qual)
 wxGCC_WARNING_SUPPRESS(double-promotion)
@@ -289,9 +296,7 @@ wxGCC_WARNING_SUPPRESS(double-promotion)
 wxGCC_WARNING_RESTORE(double-promotion)
 wxGCC_WARNING_RESTORE(cast-qual)
 
-#ifdef __VISUALC__
-    #pragma warning(pop)
-#endif
+wxMSVC_WARNING_RESTORE(4456 4702)
 
 
 class wxBitmapBundleNanoSVG : public wxBitmapBundleImplSVG
@@ -440,11 +445,44 @@ wxBitmapBundle wxBitmapBundle::FromSVG(const wxByte* data, size_t len, const wxS
 /* static */
 wxBitmapBundle wxBitmapBundle::FromSVGFile(const wxString& path, const wxSize& sizeDef)
 {
+#if wxUSE_ZLIB && wxUSE_STREAMS
+    // Handle gzip-compressed SVG files (.svgz)
+    if ( wxFileName(path).GetExt().Lower() == "svgz" )
+    {
+        wxFileInputStream fileStream(path);
+        if ( fileStream.IsOk() )
+        {
+            wxZlibInputStream zlibStream(fileStream);
+            return FromSVG(zlibStream, sizeDef);
+        }
+
+        return wxBitmapBundle();
+    }
+#endif // wxUSE_ZLIB && wxUSE_STREAMS
+
     wxCharBuffer buf = LoadSVGFile(path);
     if ( buf.data() )
         return wxBitmapBundle::FromSVG(buf.data(), sizeDef);
 
     return wxBitmapBundle();
 }
+
+#if wxUSE_STREAMS
+
+/* static */
+wxBitmapBundle wxBitmapBundle::FromSVG(wxInputStream& stream, const wxSize& sizeDef)
+{
+    wxMemoryOutputStream memOut;
+    stream.Read(memOut);
+
+    const wxStreamBuffer* const sb = memOut.GetOutputStreamBuffer();
+    const size_t len = sb->GetBufferSize();
+    if ( !len )
+        return wxBitmapBundle();
+
+    return FromSVG(static_cast<const wxByte*>(sb->GetBufferStart()), len, sizeDef);
+}
+
+#endif // wxUSE_STREAMS
 
 #endif // wxHAS_SVG

@@ -242,6 +242,9 @@
     <ClCompile Include="net\socket.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="net\webrequest_local.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="persistence\tlw.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -318,6 +321,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics\svgattributes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="graphics\svgfiledc.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="graphics\coords.cpp">

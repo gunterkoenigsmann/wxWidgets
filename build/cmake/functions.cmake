@@ -423,6 +423,12 @@ function(wx_set_target_properties target_name)
     if(wxTOOLKIT_OWN_DEFINITIONS)
         target_compile_definitions(${target_name} PRIVATE ${wxTOOLKIT_OWN_DEFINITIONS})
     endif()
+    if(NOT wxBUILD_DEBUG_LEVEL STREQUAL "Default")
+        # This must be PUBLIC as the application code must use the same
+        # value as the library, otherwise it would still use the assert
+        # functions not present in the library any more.
+        target_compile_definitions(${target_name} PUBLIC wxDEBUG_LEVEL=${wxBUILD_DEBUG_LEVEL})
+    endif()
     if(wxTARGET_IS_MONO AND wxUSE_GUI)
         target_compile_definitions(${target_name} PUBLIC wxUSE_GUI=1 PRIVATE wxUSE_BASE=1)
     elseif(wxTARGET_IS_PLUGIN)

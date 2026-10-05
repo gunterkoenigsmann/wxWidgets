@@ -588,41 +588,22 @@ private:
                 if ( m_win->HasFlag(wxTE_PROCESS_TAB) )
                     specialKey = true;
                 break;
-
-            case WXK_ESCAPE:
-                specialKey = true;
-                break;
         }
 
         if ( specialKey )
         {
-            // Check if the drop down is currently open.
+            // Check if the drop down is currently open: if it is, it handles
+            // these keys itself.
             DWORD dwFlags = 0;
-            if ( SUCCEEDED(m_autoCompleteDropDown->GetDropDownStatus(&dwFlags,
-                                                                     nullptr))
-                    && dwFlags == ACDD_VISIBLE )
+            if ( FAILED(m_autoCompleteDropDown->GetDropDownStatus(&dwFlags,
+                                                                  nullptr))
+                    || dwFlags != ACDD_VISIBLE )
             {
-                if ( event.GetKeyCode() == WXK_ESCAPE )
-                {
-                    // We need to dismiss the drop-down manually as Escape
-                    // could be eaten by something else (e.g. EVT_CHAR_HOOK in
-                    // the dialog that this control is found in) otherwise.
-                    ::SendMessage(GetHwndOf(m_win), WM_KEYDOWN, WXK_ESCAPE, 0);
-
-                    // Do not skip the event in this case, we've already handled it.
-                    return;
-                }
-            }
-            else // Drop down is not open.
-            {
-                // In this case we need to handle Return and Tab as both of
+                // But if it isn't, we need to handle Return and Tab as both of
                 // them are simply eaten by the auto completer and never reach
                 // us at all otherwise.
-                if ( event.GetKeyCode() != WXK_ESCAPE )
-                {
-                    m_entry->MSWProcessSpecialKey(event);
-                    return;
-                }
+                m_entry->MSWProcessSpecialKey(event);
+                return;
             }
         }
 
@@ -1060,93 +1041,6 @@ bool wxTextEntry::ClickDefaultButtonIfPossible()
     return !wxIsAnyModifierDown() &&
                 wxWindow::MSWClickButtonIfPossible(
                     wxWindow::MSWGetDefaultButtonFor(GetEditableWindow()));
-}
-
-// This function is also used by wxSpinCtrl, so make it extern to allow reusing
-// it from there.
-extern bool wxMSWTextEntryShouldPreProcessMessage(WXMSG* msg)
-{
-    // check for our special keys here: if we don't do it and the parent frame
-    // uses them as accelerators, they wouldn't work at all, so we disable
-    // usual preprocessing for them
-    if ( msg->message == WM_KEYDOWN )
-    {
-        const WPARAM vkey = msg->wParam;
-        if ( HIWORD(msg->lParam) & KF_ALTDOWN )
-        {
-            // Alt-Backspace is accelerator for "Undo"
-            if ( vkey == VK_BACK )
-                return false;
-        }
-        else // no Alt
-        {
-            // we want to process some Ctrl-foo and Shift-bar but no key
-            // combinations without either Ctrl or Shift nor with both of them
-            // pressed
-            const int ctrl = wxIsCtrlDown(),
-                      shift = wxIsShiftDown();
-            switch ( ctrl + shift )
-            {
-                default:
-                    wxFAIL_MSG( wxT("how many modifiers have we got?") );
-                    wxFALLTHROUGH;
-
-                case 0:
-                    switch ( vkey )
-                    {
-                        case VK_DELETE:
-                        case VK_HOME:
-                        case VK_END:
-                            return false;
-                    }
-                    break;
-
-                case 1:
-                    // either Ctrl or Shift pressed
-                    if ( ctrl )
-                    {
-                        switch ( vkey )
-                        {
-                            case 'A':
-                            case 'C':
-                            case 'V':
-                            case 'X':
-                            case VK_INSERT:
-                            case VK_DELETE:
-                            case VK_HOME:
-                            case VK_END:
-                            case VK_LEFT:
-                            case VK_RIGHT:
-                                return false;
-                        }
-                    }
-                    else // Shift is pressed
-                    {
-                        switch ( vkey )
-                        {
-                            case VK_INSERT:
-                            case VK_DELETE:
-                            case VK_HOME:
-                            case VK_END:
-                            case VK_LEFT:
-                            case VK_RIGHT:
-                                return false;
-                        }
-                    }
-                    break;
-
-                case 2:
-                    break;
-            }
-        }
-    }
-
-    return true;
-}
-
-bool wxTextEntry::MSWShouldPreProcessMessage(WXMSG* msg) const
-{
-    return wxMSWTextEntryShouldPreProcessMessage(msg);
 }
 
 #endif // wxUSE_TEXTCTRL || wxUSE_COMBOBOX

@@ -17,6 +17,7 @@
 #include "wx/ribbon/bar.h"
 #include "wx/ribbon/art.h"
 #include "wx/dcbuffer.h"
+#include "wx/renderer.h"
 #include "wx/imaglist.h"
 
 #ifndef WX_PRECOMP
@@ -568,6 +569,7 @@ void wxRibbonButtonBar::ClearButtons()
     m_dropdownKeyTips.clear();
     m_hovered_button = nullptr;
     m_active_button = nullptr;
+    m_focused_button = nullptr;
     Realize();
 }
 
@@ -586,6 +588,8 @@ bool wxRibbonButtonBar::DeleteButton(int button_id)
                 m_hovered_button = nullptr;
             if (m_active_button  && m_active_button->base  == button)
                 m_active_button = nullptr;
+            if (m_focused_button == button)
+                m_focused_button = nullptr;
             delete button;
             m_keyTips.erase(button_id);
             m_dropdownKeyTips.erase(button_id);
@@ -1099,8 +1103,24 @@ void wxRibbonButtonBar::OnPaint(wxPaintEvent& WXUNUSED(evt))
             }
         }
 
+        // Show the item with the keyboard focus as hovered, and mark it too.
+        long state = base->state | button.size;
+        const bool focused = (base == m_focused_button);
+        if ( focused )
+        {
+            state |= (base->kind == wxRIBBON_BUTTON_DROPDOWN)
+                        ? wxRIBBON_BUTTONBAR_BUTTON_DROPDOWN_HOVERED
+                        : wxRIBBON_BUTTONBAR_BUTTON_NORMAL_HOVERED;
+        }
+
         m_art->DrawButtonBarButton(dc, this, rect, base->kind,
-            base->state | button.size, base->label, bitmap, bitmap_small);
+            state, base->label, bitmap, bitmap_small);
+
+        if ( focused )
+        {
+            rect.Deflate(FromDIP(2));
+            wxRendererNative::Get().DrawFocusRect(this, dc, rect);
+        }
      }
 
     wxRibbonBar* bar = GetAncestorRibbonBar();
@@ -1619,6 +1639,103 @@ void wxRibbonButtonBar::OnMouseLeave(wxMouseEvent& WXUNUSED(evt))
         Refresh(false);
 }
 
+bool wxRibbonButtonBar::DoFocusButtonFrom(int pos, int step)
+{
+    const std::vector<wxRibbonButtonBarButtonInstance>& buttons =
+        m_layouts.Item(m_current_layout)->buttons;
+    const int count = static_cast<int>(buttons.size());
+    for ( int i = pos; i >= 0 && i < count; i += step )
+    {
+        wxRibbonButtonBarButtonBase* base = buttons[i].base;
+        if ( base->state & wxRIBBON_BUTTONBAR_BUTTON_DISABLED )
+            continue;
+
+        m_focused_button = base;
+        Refresh(false);
+
+#if wxUSE_ACCESSIBILITY
+        // The focus moves inside this window, so there is no native focus
+        // event. Tell the screen readers about it explicitly.
+        wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_FOCUS, this, wxOBJID_CLIENT, i + 1);
+#endif // wxUSE_ACCESSIBILITY
+
+        return true;
+    }
+    return false;
+}
+
+int wxRibbonButtonBar::DoGetFocusedButtonIndex() const
+{
+    if ( m_focused_button == nullptr )
+        return wxNOT_FOUND;
+
+    const std::vector<wxRibbonButtonBarButtonInstance>& buttons =
+        m_layouts.Item(m_current_layout)->buttons;
+    for ( size_t i = 0; i < buttons.size(); ++i )
+    {
+        if ( buttons[i].base == m_focused_button )
+            return static_cast<int>(i);
+    }
+    return wxNOT_FOUND;
+}
+
+bool wxRibbonButtonBar::HasFocusableItems() const
+{
+    for ( const auto& button : m_layouts.Item(m_current_layout)->buttons )
+    {
+        if ( !(button.base->state & wxRIBBON_BUTTONBAR_BUTTON_DISABLED) )
+            return true;
+    }
+    return false;
+}
+
+bool wxRibbonButtonBar::FocusFirstItem()
+{
+    return DoFocusButtonFrom(0, 1);
+}
+
+bool wxRibbonButtonBar::FocusLastItem()
+{
+    const int count = static_cast<int>(m_layouts.Item(m_current_layout)->buttons.size());
+    return DoFocusButtonFrom(count - 1, -1);
+}
+
+bool wxRibbonButtonBar::FocusNextItem(bool forward)
+{
+    const int current = DoGetFocusedButtonIndex();
+    if ( current == wxNOT_FOUND )
+        return forward ? FocusFirstItem() : FocusLastItem();
+
+    const int step = forward ? 1 : -1;
+    return DoFocusButtonFrom(current + step, step);
+}
+
+void wxRibbonButtonBar::ClearFocusedItem()
+{
+    if ( m_focused_button != nullptr )
+    {
+        m_focused_button = nullptr;
+        Refresh(false);
+    }
+}
+
+void wxRibbonButtonBar::ActivateFocusedItem(bool dropdown)
+{
+    wxRibbonButtonBarButtonBase* button = m_focused_button;
+    if ( button == nullptr )
+        return;
+
+    if ( dropdown )
+    {
+        // Only buttons with a dropdown have something to open.
+        if ( button->kind != wxRIBBON_BUTTON_DROPDOWN &&
+             button->kind != wxRIBBON_BUTTON_HYBRID )
+            return;
+    }
+
+    ActivateButton(button, dropdown);
+}
+
 wxRibbonButtonBarButtonBase *wxRibbonButtonBar::GetActiveItem() const
 {
     return m_active_button == nullptr ? nullptr : m_active_button->base;
@@ -1740,5 +1857,188 @@ void wxRibbonButtonBar::OnSysColourChanged(wxSysColourChangedEvent& event)
     if ( m_art )
         m_art->UpdateColoursFromSystem();
 }
+
+#if wxUSE_ACCESSIBILITY
+
+class wxRibbonButtonBarAccessible : public wxWindowAccessible
+{
+public:
+    explicit wxRibbonButtonBarAccessible(wxRibbonButtonBar* bar) : wxWindowAccessible(bar) { }
+
+    wxAccStatus GetChildCount(int* childCount) override
+    {
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        *childCount = static_cast<int>(bar->m_layouts.Item(bar->m_current_layout)->buttons.size());
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetChild(int childId, wxAccessible** child) override
+    {
+        *child = childId == wxACC_SELF ? this : nullptr;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetRole(int childId, wxAccRole* role) override
+    {
+        if ( childId == wxACC_SELF )
+        {
+            *role = wxROLE_SYSTEM_TOOLBAR;
+            return wxACC_OK;
+        }
+
+        wxRibbonButtonBarButtonBase* button = GetButton(childId);
+        if ( button == nullptr )
+            return wxACC_FAIL;
+
+        if ( button->kind == wxRIBBON_BUTTON_TOGGLE )
+            *role = wxROLE_SYSTEM_CHECKBUTTON;
+        else if ( button->kind & wxRIBBON_BUTTON_DROPDOWN )
+            *role = wxROLE_SYSTEM_BUTTONDROPDOWN;
+        else
+            *role = wxROLE_SYSTEM_PUSHBUTTON;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetState(int childId, long* state) override
+    {
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId == wxACC_SELF )
+        {
+            long st = 0;
+            if ( !bar->IsEnabled() )
+                st |= wxACC_STATE_SYSTEM_UNAVAILABLE;
+            if ( !bar->IsShownOnScreen() )
+                st |= wxACC_STATE_SYSTEM_INVISIBLE;
+            *state = st;
+            return wxACC_OK;
+        }
+
+        wxRibbonButtonBarButtonBase* button = GetButton(childId);
+        if ( button == nullptr )
+            return wxACC_FAIL;
+
+        long st{ 0 };
+        if ( button->state & wxRIBBON_BUTTONBAR_BUTTON_DISABLED )
+            st |= wxACC_STATE_SYSTEM_UNAVAILABLE;
+        else
+            st |= wxACC_STATE_SYSTEM_FOCUSABLE;
+        if ( button->state & wxRIBBON_BUTTONBAR_BUTTON_TOGGLED )
+            st |= wxACC_STATE_SYSTEM_CHECKED;
+        if ( button->state & wxRIBBON_BUTTONBAR_BUTTON_ACTIVE_MASK )
+            st |= wxACC_STATE_SYSTEM_PRESSED;
+
+        wxRibbonBar* ribbonBar = bar->GetAncestorRibbonBar();
+        if ( bar->m_focused_button == button && ribbonBar && ribbonBar->HasFocus() )
+            st |= wxACC_STATE_SYSTEM_FOCUSED;
+
+        *state = st;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetName(int childId, wxString* name) override
+    {
+        if ( childId == wxACC_SELF )
+            return wxWindowAccessible::GetName(childId, name);
+
+        wxRibbonButtonBarButtonBase* button = GetButton(childId);
+        if ( button == nullptr )
+            return wxACC_FAIL;
+
+        *name = wxStripMenuCodes(button->label, wxStrip_Mnemonics);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetLocation(wxRect& rect, int elementId) override
+    {
+        if ( elementId == wxACC_SELF )
+            return wxWindowAccessible::GetLocation(rect, elementId);
+
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        wxRibbonButtonBarButtonBase* button = GetButton(elementId);
+        if ( button == nullptr )
+            return wxACC_FAIL;
+
+        rect = bar->GetItemRect(button->id);
+        rect.SetPosition(bar->ClientToScreen(rect.GetPosition()));
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetDefaultAction(int childId, wxString* actionName) override
+    {
+        if ( childId == wxACC_SELF )
+            return wxACC_NOT_IMPLEMENTED;
+
+        *actionName = _("Press");
+        return wxACC_OK;
+    }
+
+    wxAccStatus DoDefaultAction(int childId) override
+    {
+        if ( childId == wxACC_SELF )
+            return wxACC_NOT_IMPLEMENTED;
+
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        wxRibbonButtonBarButtonBase* button = GetButton(childId);
+        if ( button == nullptr )
+            return wxACC_FAIL;
+
+        bar->ActivateButton(button);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetFocus(int* childId, wxAccessible** child) override
+    {
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return wxACC_FAIL;
+
+        const int index = bar->DoGetFocusedButtonIndex();
+        if ( index == wxNOT_FOUND )
+        {
+            *childId = wxACC_SELF;
+            *child = this;
+        }
+        else
+        {
+            *childId = index + 1;
+            *child = nullptr;
+        }
+        return wxACC_OK;
+    }
+
+private:
+    wxRibbonButtonBarButtonBase* GetButton(int childId)
+    {
+        wxRibbonButtonBar* bar = wxDynamicCast(GetWindow(), wxRibbonButtonBar);
+        if ( bar == nullptr )
+            return nullptr;
+
+        const std::vector<wxRibbonButtonBarButtonInstance>& buttons =
+            bar->m_layouts.Item(bar->m_current_layout)->buttons;
+        const int index = childId - 1;
+        if ( index < 0 || index >= static_cast<int>(buttons.size()) )
+            return nullptr;
+        return buttons[index].base;
+    }
+};
+
+wxAccessible* wxRibbonButtonBar::CreateAccessible()
+{
+    return new wxRibbonButtonBarAccessible(this);
+}
+
+#endif // wxUSE_ACCESSIBILITY
 
 #endif // wxUSE_RIBBON

@@ -590,9 +590,9 @@ void wxListCtrl::SetWindowStyleFlag(long flag)
 // accessors
 // ----------------------------------------------------------------------------
 
-void wxListCtrl::MSWSetDarkOrLightMode(SetMode setmode)
+void wxListCtrl::MSWSetDarkOrLightMode()
 {
-    wxListCtrlBase::MSWSetDarkOrLightMode(setmode);
+    wxListCtrlBase::MSWSetDarkOrLightMode();
 
     // Update header.
     MSWInitHeader();
@@ -843,7 +843,18 @@ bool wxListCtrl::SetColumnWidth(int col, int width)
         return true;
     }
 
-    if ( !ListView_SetColumnWidth(GetHwnd(), col, width) )
+    // See the comment in OnCustomDraw() for why we need to know about this.
+    const bool autoSize = width == LVSCW_AUTOSIZE ||
+                            width == LVSCW_AUTOSIZE_USEHEADER;
+    if ( autoSize )
+        m_inAutoSize++;
+
+    const bool ok = ListView_SetColumnWidth(GetHwnd(), col, width) != FALSE;
+
+    if ( autoSize )
+        m_inAutoSize--;
+
+    if ( !ok )
         return false;
 
     // Failure to explicitly refresh the control with horizontal rules results
@@ -1692,10 +1703,10 @@ wxSize wxListCtrl::MSWGetBestViewRect(int x, int y) const
     const DWORD mswStyle = ::GetWindowLong(GetHwnd(), GWL_STYLE);
 
     if ( !(mswStyle & WS_HSCROLL) )
-        size.y -= wxSystemSettings::GetMetric(wxSYS_HSCROLL_Y, m_parent);
+        size.y -= GetScrollbarSize(wxHORIZONTAL);
 
     if ( mswStyle & WS_VSCROLL )
-        size.x += wxSystemSettings::GetMetric(wxSYS_VSCROLL_X, m_parent);
+        size.x += GetScrollbarSize(wxVERTICAL);
 
     // This is a dirty hack, but while the size returned by the control does
     // fit its contents, it results in asymmetric horizontal margins around it,
@@ -3540,7 +3551,11 @@ WXLPARAM wxListCtrl::OnCustomDraw(WXLPARAM lParam)
             //
             // for virtual controls, always suppose that we have attributes as
             // there is no way to check for this
-            if ( IsVirtual() || m_hasAnyAttr || wxMSWDarkMode::IsActive() )
+            //
+            // in dark mode we also need to draw all items ourselves, but not
+            // when auto-sizing the columns, see CDDS_ITEMPREPAINT case below
+            if ( IsVirtual() || m_hasAnyAttr ||
+                    (wxMSWDarkMode::IsActive() && !m_inAutoSize) )
                 return CDRF_NOTIFYITEMDRAW;
             break;
 
@@ -3552,7 +3567,15 @@ WXLPARAM wxListCtrl::OnCustomDraw(WXLPARAM lParam)
             // repeat the same drawing once per column, which is not only
             // wasteful but also results in visible delays when scrolling
             // lists with many columns.
-            if ( wxMSWDarkMode::IsActive() && InReportView() )
+            //
+            // Don't do it while auto-sizing a column however: in this case the
+            // native control sends us this notification for every item, but
+            // only to allow us to select a different font for measuring it, so
+            // painting the entire row here would be useless and would make
+            // setting the column width very slow for big controls (see
+            // #24011). Just fall through to the default handling below, which
+            // takes care of the custom fonts, if any, instead.
+            if ( wxMSWDarkMode::IsActive() && InReportView() && !m_inAutoSize )
             {
                 const int item = nmcd.dwItemSpec;
 
@@ -3778,6 +3801,24 @@ wxListCtrl::MSWWindowProc(WXUINT nMsg, WXWPARAM wParam, WXLPARAM lParam)
             // so just ignore them
             if ( (HWND)wParam == ListView_GetHeader(GetHwnd()) )
                 return 0;
+            break;
+
+        case WM_KEYDOWN:
+        case WM_MOUSEWHEEL:
+        case WM_VSCROLL:
+        case LVM_ENSUREVISIBLE:
+        case LVM_SCROLL:
+            // Scrolling moves the rows drawn as hot by HandleItemPaint()
+            // without repainting them.
+            if ( wxMSWDarkMode::IsActive() && InReportView() )
+            {
+                const long top = GetTopItem();
+                auto const rc =
+                    wxListCtrlBase::MSWWindowProc(nMsg, wParam, lParam);
+                if ( GetTopItem() != top )
+                    Refresh();
+                return rc;
+            }
             break;
 
         case WM_SIZE:

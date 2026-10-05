@@ -10,6 +10,8 @@
 #ifndef _WX_GENERIC_INFOBAR_H_
 #define _WX_GENERIC_INFOBAR_H_
 
+#include "wx/containr.h"
+
 class WXDLLIMPEXP_FWD_CORE wxBitmapButton;
 class WXDLLIMPEXP_FWD_CORE wxStaticBitmap;
 class WXDLLIMPEXP_FWD_CORE wxStaticText;
@@ -24,7 +26,7 @@ enum
     wxINFOBAR_CHECKBOX = 0x0010
 };
 
-class WXDLLIMPEXP_CORE wxInfoBarGeneric : public wxInfoBarBase
+class WXDLLIMPEXP_CORE wxInfoBarGeneric : public wxNavigationEnabled<wxInfoBarBase>
 {
 public:
     // the usual ctors and Create() but remember that info bar is created
@@ -100,6 +102,10 @@ public:
     // same thing with the colour: this affects the text colour
     virtual bool SetForegroundColour(const wxColor& colour) override;
 
+#if wxUSE_ACCESSIBILITY
+    virtual wxAccessible* CreateAccessible() override;
+#endif // wxUSE_ACCESSIBILITY
+
 protected:
     // info bar shouldn't have any border by default, the colour difference
     // between it and the main window separates it well enough
@@ -151,6 +157,10 @@ private:
     int m_effectDuration;
 
     bool m_checked = false;
+
+#if wxUSE_ACCESSIBILITY
+    friend class wxInfoBarGenericAccessible;
+#endif // wxUSE_ACCESSIBILITY
 
     wxDECLARE_EVENT_TABLE();
     wxDECLARE_NO_COPY_CLASS(wxInfoBarGeneric);

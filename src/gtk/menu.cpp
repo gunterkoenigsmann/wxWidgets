@@ -551,13 +551,10 @@ DetachFromFrame(wxMenu* menu, wxFrame* frame)
             gtk_window_remove_accel_group(tlw, menu->m_accel);
     }
 
-    wxMenuItemList::compatibility_iterator node = menu->GetMenuItems().GetFirst();
-    while (node)
+    for (auto* menuitem: menu->GetMenuItems())
     {
-        wxMenuItem *menuitem = node->GetData();
         if (menuitem->IsSubMenu())
             DetachFromFrame(menuitem->GetSubMenu(), frame);
-        node = node->GetNext();
     }
 
     EnsureNoGrab(menu->m_menu);
@@ -574,13 +571,10 @@ AttachToFrame(wxMenu* menu, wxFrame* frame)
             gtk_window_add_accel_group(tlw, menu->m_accel);
     }
 
-    wxMenuItemList::compatibility_iterator node = menu->GetMenuItems().GetFirst();
-    while (node)
+    for (auto* menuitem: menu->GetMenuItems())
     {
-        wxMenuItem *menuitem = node->GetData();
         if (menuitem->IsSubMenu())
             AttachToFrame(menuitem->GetSubMenu(), frame);
-        node = node->GetNext();
     }
 
     menu->SetupBitmaps(frame);
@@ -613,11 +607,8 @@ void wxMenuBar::SetLayoutDirection(wxLayoutDirection dir)
 
     // also set the layout of all menus we already have (new ones will inherit
     // the current layout)
-    for ( wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-          node;
-          node = node->GetNext() )
+    for (auto* menu: m_menus)
     {
-        wxMenu *const menu = node->GetData();
         menu->SetLayoutDirection(dir);
     }
 }
@@ -724,12 +715,9 @@ void wxMenuBar::Attach(wxFrame *frame)
 {
     wxMenuBarBase::Attach(frame);
 
-    wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-    while (node)
+    for (auto* menu: m_menus)
     {
-        wxMenu *menu = node->GetData();
         AttachToFrame( menu, frame );
-        node = node->GetNext();
     }
 
     SetLayoutDirection(wxLayout_Default);
@@ -737,12 +725,9 @@ void wxMenuBar::Attach(wxFrame *frame)
 
 void wxMenuBar::Detach()
 {
-    wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-    while (node)
+    for (auto* menu: m_menus)
     {
-        wxMenu *menu = node->GetData();
         DetachFromFrame( menu, m_menuBarFrame );
-        node = node->GetNext();
     }
 
     EnsureNoGrab(m_widget);
@@ -855,14 +840,10 @@ static int FindMenuItemRecursive( const wxMenu *menu, const wxString &menuString
             return res;
     }
 
-    wxMenuItemList::compatibility_iterator node = menu->GetMenuItems().GetFirst();
-    while (node)
+    for (auto* item: menu->GetMenuItems())
     {
-        wxMenuItem *item = node->GetData();
         if (item->IsSubMenu())
             return FindMenuItemRecursive(item->GetSubMenu(), menuString, itemString);
-
-        node = node->GetNext();
     }
 
     return wxNOT_FOUND;
@@ -870,14 +851,11 @@ static int FindMenuItemRecursive( const wxMenu *menu, const wxString &menuString
 
 int wxMenuBar::FindMenuItem( const wxString &menuString, const wxString &itemString ) const
 {
-    wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-    while (node)
+    for (auto* menu: m_menus)
     {
-        wxMenu *menu = node->GetData();
         int res = FindMenuItemRecursive( menu, menuString, itemString);
         if (res != -1)
             return res;
-        node = node->GetNext();
     }
 
     return wxNOT_FOUND;
@@ -887,16 +865,17 @@ int wxMenuBar::FindMenuItem( const wxString &menuString, const wxString &itemStr
 static wxMenuItem* FindMenuItemByIdRecursive(const wxMenu* menu, int id)
 {
     wxMenuItem* result = menu->FindChildItem(id);
+    if (result)
+        return result;
 
-    wxMenuItemList::compatibility_iterator node = menu->GetMenuItems().GetFirst();
-    while ( node && result == nullptr )
+    for (auto* item: menu->GetMenuItems())
     {
-        wxMenuItem *item = node->GetData();
         if (item->IsSubMenu())
         {
             result = FindMenuItemByIdRecursive( item->GetSubMenu(), id );
+            if (result)
+                break;
         }
-        node = node->GetNext();
     }
 
     return result;
@@ -905,12 +884,11 @@ static wxMenuItem* FindMenuItemByIdRecursive(const wxMenu* menu, int id)
 wxMenuItem* wxMenuBar::FindItem( int id, wxMenu **menuForItem ) const
 {
     wxMenuItem* result = nullptr;
-    wxMenuList::compatibility_iterator node = m_menus.GetFirst();
-    while (node && result == nullptr)
+    for (auto* menu: m_menus)
     {
-        wxMenu *menu = node->GetData();
         result = FindMenuItemByIdRecursive( menu, id );
-        node = node->GetNext();
+        if (result)
+            break;
     }
 
     if ( menuForItem )
@@ -2044,10 +2022,8 @@ void wxMenu::SetLayoutDirection(wxLayoutDirection dir)
     {
         wxWindow::GTKSetLayout(m_owner, dir);
 
-        wxMenuItemList::compatibility_iterator node = m_items.GetFirst();
-        for (; node; node = node->GetNext())
+        for (auto* item: m_items)
         {
-            wxMenuItem* item = node->GetData();
             if (wxMenu* subMenu = item->GetSubMenu())
                 subMenu->SetLayoutDirection(dir);
             else if (GtkWidget* widget = item->GetMenuItem())
@@ -2304,10 +2280,8 @@ void wxMenu::SetupBitmaps(wxWindow *win)
     bool anyBitmap = false;
 #endif // __WXGTK4__
 
-    wxMenuItemList::compatibility_iterator node = GetMenuItems().GetFirst();
-    while (node)
+    for (auto* menuitem: GetMenuItems())
     {
-        wxMenuItem *menuitem = node->GetData();
         if (menuitem->IsSubMenu())
             menuitem->GetSubMenu()->SetupBitmaps(win);
         if (!menuitem->IsSeparator())
@@ -2318,7 +2292,6 @@ void wxMenu::SetupBitmaps(wxWindow *win)
                 anyBitmap = true;
 #endif // __WXGTK4__
         }
-        node = node->GetNext();
     }
 
 #ifdef __WXGTK4__

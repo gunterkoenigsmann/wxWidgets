@@ -580,6 +580,9 @@ protected:
 
     void DoFrameLayout();
 
+    virtual bool CanAddPane(wxWindow* window,
+                            const wxAuiPaneInfo& paneInfo) const;
+
     void LayoutAddPane(wxSizer* container,
                        wxAuiDockInfo& dock,
                        wxAuiPaneInfo& pane,
@@ -768,6 +771,10 @@ private:
 
     // Common part of ClosePane() and MinimizePane(): hide the pane window.
     void DoHidePaneWindow(wxAuiPaneInfo& paneInfo);
+
+    // Reparent the pane window back to the managed window and destroy the
+    // floating frame containing it, which must be non-null.
+    void DestroyFloatingFrame(wxAuiPaneInfo& paneInfo);
 
 
     // This flag is set to true if Update() is called while the window is

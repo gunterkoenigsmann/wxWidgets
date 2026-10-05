@@ -50,9 +50,10 @@
 static const int TEXT_HEIGHT = 200;
 
 #if defined(__WXMSW__) && !defined(__WXUNIVERSAL__)
-#define wxHAS_2CHAR_NEWLINES 1
-#else
-#define wxHAS_2CHAR_NEWLINES 0
+    #define wxHAS_2CHAR_NEWLINES
+    #if wxUSE_UIACTIONSIMULATOR && wxUSE_RICHEDIT
+        #define wxHAS_TEXT_URL_TEST
+    #endif
 #endif
 
 // ----------------------------------------------------------------------------
@@ -85,7 +86,9 @@ protected:
     // And these ones only make sense for the multi-line ones.
     void MultiLineReplace();
     //void ProcessEnter();
+#ifdef wxHAS_TEXT_URL_TEST
     void Url();
+#endif
     void Style();
     void FontStyle();
     void Lines();
@@ -174,9 +177,9 @@ wxTEXT_CTRL_SINGLE_LINE_TEST(PositionToXYSingleLine)
 wxTEXT_CTRL_SINGLE_LINE_TEST(XYToPositionSingleLine)
 
 wxTEXT_CTRL_MULTI_LINE_TEST(MultiLineReplace)
-#if wxUSE_UIACTIONSIMULATOR
+#ifdef wxHAS_TEXT_URL_TEST
     wxTEXT_CTRL_MULTI_LINE_TEST(Url)
-#endif // wxUSE_UIACTIONSIMULATOR
+#endif
 wxTEXT_CTRL_MULTI_LINE_TEST(Style)
 wxTEXT_CTRL_MULTI_LINE_TEST(FontStyle)
 wxTEXT_CTRL_MULTI_LINE_TEST(Lines)
@@ -681,32 +684,43 @@ void TextCtrlTestCase::ProcessEnter()
 }
 #endif
 
+#ifdef wxHAS_TEXT_URL_TEST
 void TextCtrlTestCase::Url()
 {
-#if wxUSE_UIACTIONSIMULATOR && defined(__WXMSW__) && !defined(__WXUNIVERSAL__)
-    if ( !EnableUITests() )
-        return;
-
-    // For some reason, this test sporadically fails when run in AppVeyor or
-    // GitHub Actions CI environments, even though it passes locally.
-    if ( IsAutomaticTest() )
-        return;
-
     CreateText(wxTE_RICH | wxTE_AUTO_URL);
 
     m_text->AppendText("http://www.wxwidgets.org");
 
-    wxUIActionSimulator sim;
-    REQUIRE(sim.MouseMove(m_text->ClientToScreen(wxPoint(5, 5))));
+    YieldForAWhile();
+
+    const long urlStart = 0;
+    const long urlEnd = m_text->GetLastPosition();
+
+    const wxPoint posStart = m_text->PositionToCoords(urlStart);
+    const wxPoint posEnd = m_text->PositionToCoords(urlEnd);
+    REQUIRE(posStart != wxDefaultPosition);
+    REQUIRE(posEnd != wxDefaultPosition);
+
+    const wxPoint urlPoint((posStart.x + posEnd.x) / 2,
+                           posStart.y +
+                               std::max(1, m_text->GetCharHeight() / 2));
+
+    long hitPos = wxNOT_FOUND;
+    REQUIRE(m_text->HitTest(urlPoint, &hitPos) == wxTE_HT_ON_TEXT);
+    REQUIRE(hitPos >= urlStart);
+    REQUIRE(hitPos < urlEnd);
 
     EventCounter url(m_text.get(), wxEVT_TEXT_URL);
 
+    wxUIActionSimulator sim;
+    REQUIRE(sim.MouseMove(m_text->ClientToScreen(urlPoint)));
     REQUIRE(sim.MouseClick());
+
     wxYield();
 
     CHECK(url.GetCount() >= 1);
-#endif
 }
+#endif // wxHAS_TEXT_URL_TEST
 
 void TextCtrlTestCase::Style()
 {
@@ -923,7 +937,7 @@ void TextCtrlTestCase::DoPositionToCoordsTestWithStyle(long style)
     const wxPoint pos0 = m_text->PositionToCoords(0);
     if ( pos0 == wxDefaultPosition )
     {
-#if ( wxHAS_2CHAR_NEWLINES ) || defined(__WXGTK__)
+#if defined(wxHAS_2CHAR_NEWLINES) || defined(__WXGTK__)
         FAIL( "PositionToCoords() unexpectedly failed." );
 #endif
         return;
@@ -1014,7 +1028,7 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
 {
     CreateText(style|wxTE_MULTILINE|wxTE_DONTWRAP);
 
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     const bool isRichEdit = (style & (wxTE_RICH | wxTE_RICH2)) != 0;
 #endif
 
@@ -1065,7 +1079,7 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
     text = wxS("123\nab\nX");
     m_text->SetValue(text);
 
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Take into account that every new line mark occupies
     // two characters, not one.
     const long numChars_msw_2 = 8 + 2;
@@ -1084,14 +1098,14 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
           { 0, 2 }, { 1, 2 } };
 
     const long &ref_numChars_2 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? numChars_2 : numChars_msw_2;
 #else
         numChars_2;
 #endif
 
     XYPos *ref_coords_2 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? coords_2 : coords_2_msw;
 #else
         coords_2;
@@ -1113,7 +1127,7 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
     text = wxS("\n\n\n");
     m_text->SetValue(text);
 
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Take into account that every new line mark occupies
     // two characters, not one.
     const long numChars_msw_3 = 3 + 3;
@@ -1134,14 +1148,14 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
           { 0, 3 } };
 
     const long &ref_numChars_3 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? numChars_3 : numChars_msw_3;
 #else
         numChars_3;
 #endif
 
     XYPos *ref_coords_3 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? coords_3 : coords_3_msw;
 #else
         coords_3;
@@ -1163,7 +1177,7 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
     text = wxS("123\na\n\nX\n\n");
     m_text->SetValue(text);
 
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Take into account that every new line mark occupies
     // two characters, not one.
     const long numChars_msw_4 = 10 + 5;
@@ -1188,14 +1202,14 @@ void TextCtrlTestCase::DoPositionToXYMultiLine(long style)
           { 0, 5 } };
 
     const long &ref_numChars_4 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? numChars_4 : numChars_msw_4;
 #else
         numChars_4;
 #endif
 
     XYPos *ref_coords_4 =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? coords_4 : coords_4_msw;
 #else
         coords_4;
@@ -1235,7 +1249,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
 {
     CreateText(style|wxTE_MULTILINE|wxTE_DONTWRAP);
 
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     const bool isRichEdit = (style & (wxTE_RICH | wxTE_RICH2)) != 0;
 #endif
 
@@ -1279,7 +1293,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
     const long maxLineLength_2 = 4;
     const long numLines_2 = 3;
     CHECK( m_text->GetNumberOfLines() == numLines_2 );
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Note: New lines are occupied by two characters.
     long pos_2_msw[numLines_2 + 1][maxLineLength_2 + 1] =
         { {  0,  1,  2,  3, -1 },   // New line occupies positions 3, 4
@@ -1294,7 +1308,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
           { -1, -1, -1, -1, -1 } };
 
     long (&ref_pos_2)[numLines_2 + 1][maxLineLength_2 + 1] =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? pos_2 : pos_2_msw;
 #else
         pos_2;
@@ -1314,7 +1328,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
     const long maxLineLength_3 = 1;
     const long numLines_3 = 4;
     CHECK( m_text->GetNumberOfLines() == numLines_3 );
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Note: New lines are occupied by two characters.
     long pos_3_msw[numLines_3 + 1][maxLineLength_3 + 1] =
         { {  0, -1 },    // New line occupies positions 0, 1
@@ -1331,7 +1345,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
           { -1, -1 } };
 
     long (&ref_pos_3)[numLines_3 + 1][maxLineLength_3 + 1] =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? pos_3 : pos_3_msw;
 #else
         pos_3;
@@ -1351,7 +1365,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
     const long maxLineLength_4 = 4;
     const long numLines_4 = 6;
     CHECK( m_text->GetNumberOfLines() == numLines_4 );
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
     // Note: New lines are occupied by two characters.
     long pos_4_msw[numLines_4 + 1][maxLineLength_4 + 1] =
         { {  0,  1,  2,  3, -1 },    // New line occupies positions 3, 4
@@ -1372,7 +1386,7 @@ void TextCtrlTestCase::DoXYToPositionMultiLine(long style)
           { -1, -1, -1, -1, -1 } };
 
     long (&ref_pos_4)[numLines_4 + 1][maxLineLength_4 + 1] =
-#if wxHAS_2CHAR_NEWLINES
+#ifdef wxHAS_2CHAR_NEWLINES
         isRichEdit ? pos_4 : pos_4_msw;
 #else
         pos_4;
@@ -1661,6 +1675,20 @@ TEST_CASE("wxTextCtrl::EventsOnCreate", "[wxTextCtrl][event]")
     text->SetValue("Bye");
     CHECK( updated.GetCount() == 1 );
 }
+
+#ifdef __WXMSW__
+TEST_CASE("wxTextCtrl::EnableFocusFromKeyboard", "[wxTextCtrl][focus]")
+{
+    auto text = make_unique<wxTextCtrl>(wxTheApp->GetTopWindow(), wxID_ANY,
+                                        "Hello", wxDefaultPosition,
+                                        wxDefaultSize, wxTE_READONLY);
+
+    CHECK( !text->AcceptsFocusFromKeyboard() );
+
+    text->EnableFocusFromKeyboard();
+    CHECK( text->AcceptsFocusFromKeyboard() );
+}
+#endif // __WXMSW__
 
 #ifdef __WXGTK3__
 TEST_CASE("wxTextCtrl::GTKSetPangoMarkup", "[wxTextCtrl][pango]")

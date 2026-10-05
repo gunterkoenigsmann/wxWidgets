@@ -71,6 +71,7 @@
     wxIMPLEMENT_DYNAMIC_CLASS(wxScrollWinEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxMouseEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxKeyEvent, wxEvent);
+    wxIMPLEMENT_DYNAMIC_CLASS(wxAcceleratorKeyEvent, wxKeyEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxSizeEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxPaintEvent, wxEvent);
     wxIMPLEMENT_DYNAMIC_CLASS(wxNcPaintEvent, wxEvent);
@@ -204,6 +205,7 @@ wxDEFINE_EVENT( wxEVT_CHAR_HOOK, wxKeyEvent );
 wxDEFINE_EVENT( wxEVT_NAVIGATION_KEY, wxNavigationKeyEvent );
 wxDEFINE_EVENT( wxEVT_KEY_DOWN, wxKeyEvent );
 wxDEFINE_EVENT( wxEVT_KEY_UP, wxKeyEvent );
+wxDEFINE_EVENT( wxEVT_ACCELERATOR_KEY, wxAcceleratorKeyEvent );
 #if wxUSE_HOTKEY
 wxDEFINE_EVENT( wxEVT_HOTKEY, wxKeyEvent );
 #endif
@@ -774,13 +776,8 @@ wxPoint wxMouseEvent::GetLogicalPosition(const wxReadOnlyDC& dc) const
 // ----------------------------------------------------------------------------
 
 wxKeyEvent::wxKeyEvent(wxEventType type)
-    : m_uniChar(WXK_NONE)
 {
     m_eventType = type;
-    m_keyCode = WXK_NONE;
-
-    m_x =
-    m_y = wxDefaultCoord;
 
     InitPropagation();
 }

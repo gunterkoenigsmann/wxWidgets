@@ -16,6 +16,7 @@
 #include "wx/ribbon/art.h"
 #include "wx/ribbon/bar.h"
 #include "wx/dcbuffer.h"
+#include "wx/renderer.h"
 #include "wx/display.h"
 #include "wx/sizer.h"
 
@@ -37,6 +38,7 @@ wxBEGIN_EVENT_TABLE(wxRibbonPanel, wxRibbonControl)
     EVT_ENTER_WINDOW(wxRibbonPanel::OnMouseEnter)
     EVT_ERASE_BACKGROUND(wxRibbonPanel::OnEraseBackground)
     EVT_KILL_FOCUS(wxRibbonPanel::OnKillFocus)
+    EVT_KEY_DOWN(wxRibbonPanel::OnKeyDown)
     EVT_LEAVE_WINDOW(wxRibbonPanel::OnMouseLeave)
     EVT_MOTION(wxRibbonPanel::OnMotion)
     EVT_LEFT_DOWN(wxRibbonPanel::OnMouseClick)
@@ -338,6 +340,15 @@ void wxRibbonPanel::OnPaint(wxPaintEvent& WXUNUSED(evt))
         else
         {
             m_art->DrawPanelBackground(dc, this, GetSize());
+        }
+
+        if ( m_item_focused )
+        {
+            wxRect rect = IsMinimised() ? wxRect{ GetSize() } : m_ext_button_rect;
+            if ( IsMinimised() )
+                rect.Deflate(FromDIP(3));
+            if ( !rect.IsEmpty() )
+                wxRendererNative::Get().DrawFocusRect(this, dc, rect);
         }
 
         wxRibbonBar* bar = GetAncestorRibbonBar();
@@ -802,11 +813,167 @@ void wxRibbonPanel::OnMouseClick(wxMouseEvent& WXUNUSED(evt))
     }
     else if(IsExtButtonHovered())
     {
-        wxRibbonPanelEvent notification(wxEVT_RIBBONPANEL_EXTBUTTON_ACTIVATED, GetId());
-        notification.SetEventObject(this);
-        notification.SetPanel(this);
-        ProcessEvent(notification);
+        DoActivateExtButton();
     }
+}
+
+void wxRibbonPanel::DoActivateExtButton()
+{
+    wxRibbonPanelEvent notification(wxEVT_RIBBONPANEL_EXTBUTTON_ACTIVATED, GetId());
+    notification.SetEventObject(this);
+    notification.SetPanel(this);
+    ProcessEvent(notification);
+}
+
+bool wxRibbonPanel::HasFocusableItems() const
+{
+    return IsMinimised() || HasExtButton();
+}
+
+bool wxRibbonPanel::FocusFirstItem()
+{
+    if ( !HasFocusableItems() )
+        return false;
+
+    m_item_focused = true;
+    Refresh(false);
+
+#if wxUSE_ACCESSIBILITY
+    wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_FOCUS, this, wxOBJID_CLIENT,
+                              IsMinimised() ? wxACC_SELF
+                                            : static_cast<int>(GetChildren().GetCount()) + 1);
+#endif // wxUSE_ACCESSIBILITY
+
+    return true;
+}
+
+bool wxRibbonPanel::FocusLastItem()
+{
+    return FocusFirstItem();
+}
+
+void wxRibbonPanel::ClearFocusedItem()
+{
+    if ( m_item_focused )
+    {
+        m_item_focused = false;
+        Refresh(false);
+    }
+}
+
+void wxRibbonPanel::AppendFocusableControls(std::vector<wxRibbonControl*>& controls)
+{
+    if ( IsMinimised() )
+    {
+        // The children are all hidden, the panel is the only item.
+        controls.push_back(this);
+        return;
+    }
+
+    for ( wxWindowList::compatibility_iterator node = GetChildren().GetFirst();
+          node; node = node->GetNext() )
+    {
+        wxRibbonControl* control = wxDynamicCast(node->GetData(), wxRibbonControl);
+        if ( control != nullptr && control->IsShown() && control->HasFocusableItems() )
+            controls.push_back(control);
+    }
+
+    // The extension button is at the end, after the panel's contents.
+    if ( HasExtButton() )
+        controls.push_back(this);
+}
+
+void wxRibbonPanel::ActivateFocusedItem(bool dropdown)
+{
+    if ( dropdown || !m_item_focused )
+        return;
+
+    if ( IsMinimised() )
+    {
+        if ( m_expanded_panel != nullptr )
+        {
+            HideExpanded();
+        }
+        else if ( ShowExpanded() && m_expanded_panel != nullptr )
+        {
+            // The popup has the keyboard focus now, start at its first item.
+            std::vector<wxRibbonControl*> controls;
+            m_expanded_panel->AppendFocusableControls(controls);
+            m_expanded_panel->m_focusedControl = FocusFirstItemIn(controls, true);
+        }
+    }
+    else if ( HasExtButton() )
+    {
+        DoActivateExtButton();
+    }
+}
+
+void wxRibbonPanel::OnKeyDown(wxKeyEvent& evt)
+{
+    // Only the popup of a minimized panel ever has the keyboard focus.
+    if ( m_expanded_dummy == nullptr || (evt.GetModifiers() & ~wxMOD_SHIFT) )
+    {
+        evt.Skip();
+        return;
+    }
+
+    bool forward = true;
+    switch ( evt.GetKeyCode() )
+    {
+        case WXK_TAB:
+            forward = !evt.ShiftDown();
+            break;
+
+        case WXK_LEFT:
+            forward = false;
+            break;
+
+        case WXK_RIGHT:
+            break;
+
+        case WXK_RETURN:
+        case WXK_NUMPAD_ENTER:
+        case WXK_SPACE:
+            if ( wxRibbonControl* current = m_focusedControl.get() )
+                current->ActivateFocusedItem();
+            return;
+
+        case WXK_UP:
+            if ( wxRibbonControl* current = m_focusedControl.get() )
+                current->FocusItemInDirection(wxUP);
+            return;
+
+        case WXK_DOWN:
+            if ( wxRibbonControl* current = m_focusedControl.get() )
+            {
+                if ( !current->FocusItemInDirection(wxDOWN) )
+                    current->ActivateFocusedItem(true);
+            }
+            return;
+
+        case WXK_ESCAPE:
+            {
+                // Close the popup and go back to its panel in the bar.
+                wxRibbonPanel* dummy = m_expanded_dummy;
+                wxRibbonBar* bar = dummy->GetAncestorRibbonBar();
+                HideExpanded();
+                if ( bar != nullptr )
+                    bar->FocusItemOf(dummy);
+            }
+            return;
+
+        default:
+            evt.Skip();
+            return;
+    }
+
+    std::vector<wxRibbonControl*> controls;
+    AppendFocusableControls(controls);
+    wxRibbonControl* next = m_focusedControl
+        ? FocusNextItemIn(controls, m_focusedControl.get(), forward)
+        : FocusFirstItemIn(controls, forward);
+    if ( next != nullptr )
+        m_focusedControl = next;
 }
 
 wxRibbonPanel* wxRibbonPanel::GetExpandedDummy()
@@ -985,6 +1152,11 @@ bool wxRibbonPanel::HideExpanded()
         }
     }
 
+    // The children keep the state of the item which had the keyboard focus.
+    if ( m_focusedControl )
+        m_focusedControl->ClearFocusedItem();
+    ClearFocusedItem();
+
     // Keep any keytips set while the panel was expanded.
     m_expanded_dummy->m_extButtonKeyTip = m_extButtonKeyTip;
     m_expanded_dummy->m_keyTip = m_keyTip;
@@ -1136,5 +1308,230 @@ void wxRibbonPanel::HideIfExpanded()
     if (containingPage)
         containingPage->HideIfExpanded();
 }
+
+#if wxUSE_ACCESSIBILITY
+
+class wxRibbonPanelAccessible : public wxWindowAccessible
+{
+public:
+    explicit wxRibbonPanelAccessible(wxRibbonPanel* panel) : wxWindowAccessible(panel) { }
+
+    wxAccStatus GetChildCount(int* childCount) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        *childCount = static_cast<int>(panel->GetChildren().GetCount())
+                    + (panel->HasExtButton() ? 1 : 0);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetChild(int childId, wxAccessible** child) override
+    {
+        if ( childId == wxACC_SELF )
+        {
+            *child = this;
+            return wxACC_OK;
+        }
+
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxWindowAccessible::GetChild(childId, child);
+
+        *child = nullptr;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetRole(int childId, wxAccRole* role) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId == wxACC_SELF )
+        {
+            *role = panel->IsMinimised() ? wxROLE_SYSTEM_BUTTONDROPDOWN
+                                          : wxROLE_SYSTEM_GROUPING;
+            return wxACC_OK;
+        }
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        *role = wxROLE_SYSTEM_PUSHBUTTON;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetState(int childId, long* state) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        long st{ 0 };
+        if ( !panel->IsEnabled() )
+            st |= wxACC_STATE_SYSTEM_UNAVAILABLE;
+        if ( !panel->IsShownOnScreen() )
+            st |= wxACC_STATE_SYSTEM_INVISIBLE;
+
+        wxRibbonBar* ribbonBar = panel->GetAncestorRibbonBar();
+        const bool barFocused = ribbonBar && ribbonBar->HasFocus();
+
+        if ( childId == wxACC_SELF )
+        {
+            if ( panel->IsMinimised() )
+            {
+                st |= wxACC_STATE_SYSTEM_FOCUSABLE;
+                st |= panel->m_expanded_panel ? wxACC_STATE_SYSTEM_EXPANDED
+                                               : wxACC_STATE_SYSTEM_COLLAPSED;
+                if ( panel->m_item_focused && barFocused )
+                    st |= wxACC_STATE_SYSTEM_FOCUSED;
+            }
+            *state = st;
+            return wxACC_OK;
+        }
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        st |= wxACC_STATE_SYSTEM_FOCUSABLE;
+        if ( !panel->IsMinimised() && panel->m_item_focused && barFocused )
+            st |= wxACC_STATE_SYSTEM_FOCUSED;
+        *state = st;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetName(int childId, wxString* name) override
+    {
+        if ( childId == wxACC_SELF )
+            return wxWindowAccessible::GetName(childId, name);
+
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        const wxString label = panel->GetLabel();
+        *name = label.empty() ? _("More options")
+                               : wxString::Format(_("More %s options"), label);
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetLocation(wxRect& rect, int elementId) override
+    {
+        if ( elementId == wxACC_SELF )
+            return wxWindowAccessible::GetLocation(rect, elementId);
+
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( elementId >= 0 && elementId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxWindowAccessible::GetLocation(rect, elementId);
+
+        rect = panel->GetExtButtonRect();
+        rect.SetPosition(panel->ClientToScreen(rect.GetPosition()));
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetDefaultAction(int childId, wxString* actionName) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId == wxACC_SELF )
+        {
+            if ( !panel->IsMinimised() )
+                return wxACC_NOT_IMPLEMENTED;
+            *actionName = _("Switch");
+            return wxACC_OK;
+        }
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        *actionName = _("Press");
+        return wxACC_OK;
+    }
+
+    wxAccStatus DoDefaultAction(int childId) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( childId == wxACC_SELF )
+        {
+            if ( !panel->IsMinimised() )
+                return wxACC_NOT_IMPLEMENTED;
+            DoToggleExpanded(panel);
+            return wxACC_OK;
+        }
+
+        if ( childId >= 0 && childId <= static_cast<int>(panel->GetChildren().GetCount()) )
+            return wxACC_NOT_IMPLEMENTED;
+
+        panel->DoActivateExtButton();
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetFocus(int* childId, wxAccessible** child) override
+    {
+        wxRibbonPanel* panel = wxDynamicCast(GetWindow(), wxRibbonPanel);
+        if ( panel == nullptr )
+            return wxACC_FAIL;
+
+        if ( panel->m_item_focused )
+        {
+            if ( panel->IsMinimised() )
+            {
+                *childId = wxACC_SELF;
+                *child = this;
+            }
+            else
+            {
+                *childId = static_cast<int>(panel->GetChildren().GetCount()) + 1;
+                *child = nullptr;
+            }
+        }
+        else
+        {
+            *childId = 0;
+            *child = nullptr;
+        }
+        return wxACC_OK;
+    }
+
+private:
+    // Same as ActivateFocusedItem()'s minimized-panel branch, but unconditional.
+    static void DoToggleExpanded(wxRibbonPanel* panel)
+    {
+        if ( panel->m_expanded_panel != nullptr )
+        {
+            panel->HideExpanded();
+        }
+        else if ( panel->ShowExpanded() && panel->m_expanded_panel != nullptr )
+        {
+            std::vector<wxRibbonControl*> controls;
+            panel->m_expanded_panel->AppendFocusableControls(controls);
+            panel->m_expanded_panel->m_focusedControl =
+                wxRibbonControl::FocusFirstItemIn(controls, true);
+        }
+    }
+};
+
+wxAccessible* wxRibbonPanel::CreateAccessible()
+{
+    return new wxRibbonPanelAccessible(this);
+}
+
+#endif // wxUSE_ACCESSIBILITY
 
 #endif // wxUSE_RIBBON

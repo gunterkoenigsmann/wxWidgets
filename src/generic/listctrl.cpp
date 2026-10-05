@@ -40,6 +40,8 @@
 #include "wx/generic/private/listctrl.h"
 #include "wx/generic/private/widthcalc.h"
 
+#include "wx/private/access.h"
+
 #ifdef __WXMAC__
     #include "wx/osx/private.h"
 #endif
@@ -2024,6 +2026,78 @@ void wxListMainWindow::RefreshSelected()
     }
 }
 
+void wxListMainWindow::UpdateAccessibleItems()
+{
+    wxPrivate::AccessibleRows rows;
+
+    const size_t count = GetItemCount();
+    if ( count )
+    {
+        const bool inReportView = InReportView();
+
+        // Only the shown items are exposed: the control may have thousands of
+        // them and the elements of the ones which are not shown would be
+        // useless anyhow, as their rectangles would be outside of it.
+        size_t visibleFrom, visibleTo;
+        if ( inReportView )
+        {
+            GetVisibleLinesRange(&visibleFrom, &visibleTo);
+        }
+        else // There is no simple way to find the visible items in this case.
+        {
+            visibleFrom = 0;
+            visibleTo = count - 1;
+        }
+
+        const wxRect rectClient(GetClientSize());
+        const int numCols = inReportView ? GetColumnCount() : 1;
+
+        for ( size_t line = visibleFrom; line <= visibleTo; ++line )
+        {
+            wxRect rect;
+            GetItemRect(line, rect);
+            if ( !inReportView && !rect.Intersects(rectClient) )
+                continue;
+
+            wxPrivate::AccessibleRow row(line, rect);
+            row.selected = IsHighlighted(line);
+
+            for ( int col = 0; col < numCols; ++col )
+            {
+                // Only the report view has real columns, in the other ones the
+                // single value is the item label.
+                wxRect rectCell;
+                if ( inReportView )
+                {
+                    GetSubItemRect(line, col, rectCell);
+                }
+                else
+                {
+                    rectCell = GetLineLabelRect(line);
+                    GetListCtrl()->CalcScrolledPosition(rectCell.x, rectCell.y,
+                                                        &rectCell.x, &rectCell.y);
+                }
+
+                row.cells.emplace_back(GetItemText(line, col), rectCell);
+            }
+
+            rows.push_back(row);
+        }
+    }
+
+    wxPrivate::SetAccessibleTable(this, rows, count);
+
+    // Announce the current item if it has changed, as the screen readers have
+    // no other way of knowing that the user has moved to another one.
+    const long current = HasCurrent() ? (long)m_current : -1;
+    if ( current != m_lastAccessibleCurrent )
+    {
+        m_lastAccessibleCurrent = current;
+
+        wxPrivate::SetAccessibleCurrentRow(this, current);
+    }
+}
+
 void wxListMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
 {
     // Note: a wxPaintDC must be constructed even if no drawing is
@@ -2032,6 +2106,9 @@ void wxListMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
 
     if ( IsEmpty() )
     {
+        // Remove the accessible elements for the previously shown items.
+        UpdateAccessibleItems();
+
         // nothing to draw or not the moment to draw it
         return;
     }
@@ -2203,6 +2280,10 @@ void wxListMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
         wxRendererNative::Get().DrawFocusRect(this, dc, rect, flags);
     }
 #endif // !__WXMAC__
+
+    // The items we've just drawn may be different from the previous ones, e.g.
+    // because the control was scrolled, so refresh the elements using them.
+    UpdateAccessibleItems();
 }
 
 void wxListMainWindow::OnSysColourChanged( wxSysColourChangedEvent &event )
@@ -2971,8 +3052,9 @@ void wxListMainWindow::OnArrowChar(size_t newCurrent, const wxKeyEvent& event)
     {
         // all previously selected items are unselected unless ctrl is held in
         // a multi-selection control. in single selection mode we must always
-        // have a selected item.
-        if ( !event.ControlDown() || IsSingleSel() )
+        // have a selected item. note that we use the real Ctrl key here and
+        // not Cmd under macOS, where Cmd-arrows have a different meaning.
+        if ( !event.RawControlDown() || IsSingleSel() )
         {
             HighlightOnly(m_current, oldCurrent);
 
@@ -3080,6 +3162,20 @@ void wxListMainWindow::OnChar( wxKeyEvent &event )
     }
 
     int keyCode = event.GetKeyCode();
+
+#ifdef __WXOSX__
+    // Cmd-Up and Cmd-Down are the standard shortcuts for going to the first and
+    // the last item under macOS, where the keyboards often don't have Home and
+    // End keys at all, so handle them in the same way as those keys.
+    if ( event.CmdDown() && (keyCode == WXK_UP || keyCode == WXK_DOWN) )
+    {
+        if ( !IsEmpty() )
+            OnArrowChar(keyCode == WXK_UP ? 0 : GetItemCount() - 1, event);
+
+        return;
+    }
+#endif // __WXOSX__
+
     switch ( keyCode )
     {
         case WXK_UP:
@@ -3846,10 +3942,11 @@ wxRect wxListMainWindow::GetViewRect() const
 
     // account for the scrollbars if necessary
     const wxSize sizeAll = GetClientSize();
+    const wxGenericListCtrl* const listctrl = GetListCtrl();
     if ( xMax > sizeAll.x )
-        yMax += wxSystemSettings::GetMetric(wxSYS_HSCROLL_Y);
+        yMax += listctrl->GetScrollbarSize(wxHORIZONTAL);
     if ( yMax > sizeAll.y )
-        xMax += wxSystemSettings::GetMetric(wxSYS_VSCROLL_X);
+        xMax += listctrl->GetScrollbarSize(wxVERTICAL);
 
     return wxRect(0, 0, xMax, yMax);
 }
@@ -3974,6 +4071,12 @@ void wxListMainWindow::CheckItem(long item, bool state)
     if ( !IsVirtual() )
     {
         wxListLineData* line = GetLine((size_t)item);
+
+        // Don't send any events if nothing changes, for consistency with
+        // wxMSW, where the native control doesn't send them in this case.
+        if ( line->IsChecked() == state )
+            return;
+
         line->Check(state);
 
         RefreshLine(item);
@@ -4202,8 +4305,8 @@ void wxListMainWindow::RecalculatePositions()
                     if ( (tries == 0) &&
                             (entireWidth + SCROLL_UNIT_X > clientWidth) )
                     {
-                        clientHeight -= wxSystemSettings::
-                                            GetMetric(wxSYS_HSCROLL_Y);
+                        clientHeight -=
+                            GetListCtrl()->GetScrollbarSize(wxHORIZONTAL);
                         m_linesPerPage = 0;
                         break;
                     }
@@ -4774,6 +4877,11 @@ void wxListMainWindow::OnScroll(wxScrollWinEvent& event)
 
 int wxListMainWindow::GetCountPerPage() const
 {
+    // The number of lines per page may be out of date if we're dirty, so
+    // recompute it in this case.
+    if ( m_dirty )
+        wxConstCast(this, wxListMainWindow)->RecalculatePositions();
+
     if ( !m_linesPerPage )
     {
         wxConstCast(this, wxListMainWindow)->
@@ -5810,10 +5918,10 @@ wxSize wxGenericListCtrl::DoGetBestClientSize() const
         const wxSize sizeVirt = m_mainWin->GetVirtualSize();
 
         if ( sizeVirt.x > sizeClient.x /* HasScrollbar(wxHORIZONTAL) */ )
-            sizeBest.y += wxSystemSettings::GetMetric(wxSYS_HSCROLL_Y);
+            sizeBest.y += GetScrollbarSize(wxHORIZONTAL);
 
         if ( sizeVirt.y > sizeClient.y /* HasScrollbar(wxVERTICAL) */ )
-            sizeBest.x += wxSystemSettings::GetMetric(wxSYS_VSCROLL_X);
+            sizeBest.x += GetScrollbarSize(wxVERTICAL);
     }
 
     return sizeBest;

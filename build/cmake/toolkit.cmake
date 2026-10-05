@@ -88,6 +88,14 @@ if(WXGTK)
         set(gtk_min_version 2.6.0)
     endif()
 
+    # Unset variables from FindGTK3 and FindGTK4, which are the only ones
+    # to set them: a stale cached value would otherwise stop the check
+    # from running again after switching toolkit.
+    if(NOT WXGTK3 AND NOT WXGTK4)
+       set(wxHAVE_GDK_WAYLAND OFF)
+       set(wxHAVE_GDK_X11 OFF)
+    endif()
+
     find_package(${gtk_lib} ${gtk_min_version} REQUIRED)
 
     if(WXGTK4)

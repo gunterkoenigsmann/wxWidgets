@@ -105,6 +105,7 @@ TEST_OBJECTS =  \
 	test_ipc_test_server.o \
 	test_socket.o \
 	test_webrequest.o \
+	test_webrequest_local.o \
 	test_regextest.o \
 	test_wxregextest.o \
 	test_scopeguardtest.o \
@@ -173,6 +174,7 @@ TEST_GUI_OBJECTS =  \
 	test_gui_clipper.o \
 	test_gui_clippingbox.o \
 	test_gui_svgattributes.o \
+	test_gui_svgfiledc.o \
 	test_gui_coords.o \
 	test_gui_graphbitmap.o \
 	test_gui_graphmatrix.o \
@@ -191,6 +193,7 @@ TEST_GUI_OBJECTS =  \
 	test_gui_comboboxtest.o \
 	test_gui_dataviewctrltest.o \
 	test_gui_datepickerctrltest.o \
+	test_gui_dirctrltest.o \
 	test_gui_frametest.o \
 	test_gui_gaugetest.o \
 	test_gui_gridtest.o \
@@ -258,6 +261,7 @@ TEST_GUI_OBJECTS =  \
 	test_gui_socket.o \
 	test_gui_ipc.o \
 	test_gui_ipc_test_server.o \
+	test_gui_webrequest_local.o \
 	test_gui_tlw.o \
 	test_gui_dataview.o \
 	test_gui_rowheightcachetest.o \
@@ -765,6 +769,9 @@ test_socket.o: $(srcdir)/net/socket.cpp $(TEST_ODEP)
 test_webrequest.o: $(srcdir)/net/webrequest.cpp $(TEST_ODEP)
 	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) $(srcdir)/net/webrequest.cpp
 
+test_webrequest_local.o: $(srcdir)/net/webrequest_local.cpp $(TEST_ODEP)
+	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) $(srcdir)/net/webrequest_local.cpp
+
 test_regextest.o: $(srcdir)/regex/regextest.cpp $(TEST_ODEP)
 	$(CXXC) -c -o $@ $(TEST_CXXFLAGS) $(srcdir)/regex/regextest.cpp
 
@@ -948,6 +955,9 @@ test_gui_clippingbox.o: $(srcdir)/graphics/clippingbox.cpp $(TEST_GUI_ODEP)
 test_gui_svgattributes.o: $(srcdir)/graphics/svgattributes.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/graphics/svgattributes.cpp
 
+test_gui_svgfiledc.o: $(srcdir)/graphics/svgfiledc.cpp $(TEST_GUI_ODEP)
+	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/graphics/svgfiledc.cpp
+
 test_gui_coords.o: $(srcdir)/graphics/coords.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/graphics/coords.cpp
 
@@ -1001,6 +1011,9 @@ test_gui_dataviewctrltest.o: $(srcdir)/controls/dataviewctrltest.cpp $(TEST_GUI_
 
 test_gui_datepickerctrltest.o: $(srcdir)/controls/datepickerctrltest.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/controls/datepickerctrltest.cpp
+
+test_gui_dirctrltest.o: $(srcdir)/controls/dirctrltest.cpp $(TEST_GUI_ODEP)
+	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/controls/dirctrltest.cpp
 
 test_gui_frametest.o: $(srcdir)/controls/frametest.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/controls/frametest.cpp
@@ -1202,6 +1215,9 @@ test_gui_ipc.o: $(srcdir)/net/ipc.cpp $(TEST_GUI_ODEP)
 
 test_gui_ipc_test_server.o: $(srcdir)/net/ipc_test_server.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/net/ipc_test_server.cpp
+
+test_gui_webrequest_local.o: $(srcdir)/net/webrequest_local.cpp $(TEST_GUI_ODEP)
+	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/net/webrequest_local.cpp
 
 test_gui_tlw.o: $(srcdir)/persistence/tlw.cpp $(TEST_GUI_ODEP)
 	$(CXXC) -c -o $@ $(TEST_GUI_CXXFLAGS) $(srcdir)/persistence/tlw.cpp

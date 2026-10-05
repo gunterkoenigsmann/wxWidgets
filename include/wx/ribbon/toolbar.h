@@ -18,6 +18,7 @@
 #include "wx/bmpbndl.h"
 
 #include <unordered_map>
+#include <vector>
 
 class wxRibbonToolBarToolBase;
 class wxRibbonToolBarToolGroup;
@@ -177,8 +178,23 @@ public:
     // activation. If dropdown is true, fires the dropdown-clicked event.
     void ActivateTool(wxRibbonToolBarToolBase* tool, bool dropdown = false);
 
+    // Keyboard navigation.
+    bool HasFocusableItems() const override;
+    bool FocusFirstItem() override;
+    bool FocusLastItem() override;
+    bool FocusNextItem(bool forward) override;
+    void ClearFocusedItem() override;
+    void ActivateFocusedItem(bool dropdown = false) override;
+
+#if wxUSE_ACCESSIBILITY
+    virtual wxAccessible* CreateAccessible() override;
+#endif // wxUSE_ACCESSIBILITY
+
 protected:
     friend class wxRibbonToolBarEvent;
+#if wxUSE_ACCESSIBILITY
+    friend class wxRibbonToolBarAccessible;
+#endif // wxUSE_ACCESSIBILITY
     virtual wxSize DoGetBestSize() const override;
     wxBorder GetDefaultBorder() const override { return wxBORDER_NONE; }
 
@@ -205,9 +221,13 @@ protected:
 
     static wxBitmap MakeDisabledBitmap(const wxBitmap& original);
 
+    std::vector<wxRibbonToolBarToolBase*> GetEnabledTools() const;
+    void DoFocusTool(wxRibbonToolBarToolBase* tool);
+
     wxArrayRibbonToolBarToolGroup m_groups;
     wxRibbonToolBarToolBase* m_hover_tool = nullptr;
     wxRibbonToolBarToolBase* m_active_tool = nullptr;
+    wxRibbonToolBarToolBase* m_focused_tool = nullptr;
     wxSize* m_sizes = nullptr;
     int m_nrows_min = 0;
     int m_nrows_max = 0;

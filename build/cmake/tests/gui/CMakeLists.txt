@@ -25,6 +25,7 @@ set(TEST_GUI_SRC
     graphics/clipper.cpp
     graphics/clippingbox.cpp
     graphics/svgattributes.cpp
+    graphics/svgfiledc.cpp
     graphics/coords.cpp
     graphics/graphbitmap.cpp
     graphics/graphmatrix.cpp
@@ -45,6 +46,7 @@ set(TEST_GUI_SRC
     controls/comboboxtest.cpp
     controls/dataviewctrltest.cpp
     controls/datepickerctrltest.cpp
+    controls/dirctrltest.cpp
     controls/frametest.cpp
     controls/gaugetest.cpp
     controls/gridtest.cpp
@@ -113,10 +115,11 @@ set(TEST_GUI_SRC
     misc/safearrayconverttest.cpp
     misc/settings.cpp
     misc/textwrap.cpp
-    # This one is intentionally duplicated here (it is also part of
-    # non-GUI test) as sockets behave differently in console and GUI
-    # applications.
+    # These ones are intentionally duplicated here (they are also part of
+    # non-GUI test) as sockets and web requests behave differently in
+    # console and GUI applications.
     net/socket.cpp
+    net/webrequest_local.cpp
     persistence/tlw.cpp
     persistence/dataview.cpp
     rowheightcache/rowheightcachetest.cpp

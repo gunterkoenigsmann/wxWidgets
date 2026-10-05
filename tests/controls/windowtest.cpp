@@ -9,7 +9,6 @@
 
 #include "testprec.h"
 
-
 #ifndef WX_PRECOMP
     #include "wx/app.h"
     #include "wx/window.h"
@@ -33,6 +32,7 @@
 #include "wx/stattext.h"
 #include "wx/stopwatch.h"
 #include "wx/textctrl.h"
+#include "wx/richtooltip.h"
 #include "wx/timer.h"
 
 #include "wx/tooltip.h"
@@ -45,6 +45,12 @@
 #ifdef __WXGTK__
     #include "wx/gtk/private/backend.h"
 #endif // __WXGTK__
+
+#if defined(__WXMSW__) && wxUSE_ACCESSIBILITY
+    #include "wx/msw/private.h"
+    #include "wx/msw/ole/oleutils.h"
+    #include <oleacc.h>
+#endif // __WXMSW__ && wxUSE_ACCESSIBILITY
 
 
 #ifdef __WXGTK4__
@@ -173,21 +179,30 @@ public:
 
         m_scrollWindowCallCount++;
         m_lastScrollWindowDelta = wxPoint(dx, dy);
+        m_lastScrollWindowViewStart = GetViewStart();
     }
 
     void ResetScrollWindowCalls()
     {
         m_scrollWindowCallCount = 0;
         m_lastScrollWindowDelta = wxPoint();
+        m_lastScrollWindowViewStart = wxDefaultPosition;
     }
 
     int GetScrollWindowCallCount() const { return m_scrollWindowCallCount; }
 
     wxPoint GetLastScrollWindowDelta() const { return m_lastScrollWindowDelta; }
 
+    // Return the view start as it was during the last ScrollWindow() call.
+    wxPoint GetLastScrollWindowViewStart() const
+    {
+        return m_lastScrollWindowViewStart;
+    }
+
 private:
     int m_scrollWindowCallCount = 0;
     wxPoint m_lastScrollWindowDelta;
+    wxPoint m_lastScrollWindowViewStart;
 };
 
 #endif // wxUSE_SCROLLBAR
@@ -231,6 +246,36 @@ TEST_CASE_METHOD(WindowTestCase, "Window::ScrolledWindowPhysicalScrolling",
     CHECK( win->GetViewStart() == wxPoint(1, 2) );
     REQUIRE( win->GetScrollWindowCallCount() == 1 );
     CHECK( win->GetLastScrollWindowDelta() == wxPoint(-10, 0) );
+}
+
+TEST_CASE_METHOD(WindowTestCase, "Window::ScrolledWindowViewStart",
+                 "[window][scroll]")
+{
+    auto win = make_unique<ScrollCountingWindow>(wxTheApp->GetTopWindow());
+
+    // ScrollWindow() must be called after updating the scroll position, so
+    // that it can be used, e.g. to convert between logical and device
+    // coordinates, in the overridden version of this function.
+    win->Scroll(0, 3);
+
+    REQUIRE( win->GetScrollWindowCallCount() == 1 );
+    CHECK( win->GetLastScrollWindowDelta() == wxPoint(0, -30) );
+    CHECK( win->GetLastScrollWindowViewStart() == wxPoint(0, 3) );
+
+    win->ResetScrollWindowCalls();
+    win->Scroll(2, -1);
+
+    REQUIRE( win->GetScrollWindowCallCount() == 1 );
+    CHECK( win->GetLastScrollWindowDelta() == wxPoint(-20, 0) );
+    CHECK( win->GetLastScrollWindowViewStart() == wxPoint(2, 3) );
+
+    // When scrolling in both directions, ScrollWindow() is called twice and
+    // the view start must be fully updated by the time of the last call.
+    win->ResetScrollWindowCalls();
+    win->Scroll(1, 1);
+
+    REQUIRE( win->GetScrollWindowCallCount() == 2 );
+    CHECK( win->GetLastScrollWindowViewStart() == wxPoint(1, 1) );
 }
 
 #endif // wxUSE_SCROLLBAR
@@ -587,6 +632,23 @@ TEST_CASE_METHOD(WindowTestCase, "Window::ToolTip", "[window]")
 }
 #endif // wxUSE_TOOLTIPS
 
+#if wxUSE_RICHTOOLTIP
+TEST_CASE_METHOD(WindowTestCase, "Window::RichToolTip", "[window][richtooltip]")
+{
+    wxRichToolTip tip1("First title", "First message");
+    tip1.SetTimeout(100);
+    tip1.ShowFor(m_window);
+
+    wxRichToolTip tip2("Second title", "Second message");
+    tip2.SetTimeout(10);
+    tip2.ShowFor(m_window);
+
+    YieldForAWhile();
+
+    SUCCEED();
+}
+#endif // wxUSE_RICHTOOLTIP
+
 TEST_CASE_METHOD(WindowTestCase, "Window::Help", "[window]")
 {
 #if wxUSE_HELP
@@ -831,14 +893,6 @@ TEST_CASE_METHOD(WindowTestCase, "Window::Refresh", "[window]")
 {
     wxWindow* const parent = m_window;
 
-    // Ensure that the window doesn't need a redraw before starting this test:
-    // it could need one if some other window overlapping it created by a
-    // previously running test was destroyed but this window was not repainted
-    // after that yet. Without this, child1 could still get repainted even if
-    // we don't refresh it and this is exactly what happened under Mac.
-    parent->Refresh();
-    WaitForPaint waitForPaint(parent);
-
     wxWindow* const child1 = new wxWindow(parent, wxID_ANY, wxPoint(10, 20), wxSize(80, 50));
     wxWindow* const child2 = new wxWindow(parent, wxID_ANY, wxPoint(110, 20), wxSize(80, 50));
     wxWindow* const child3 = new wxWindow(parent, wxID_ANY, wxPoint(210, 20), wxSize(80, 50));
@@ -854,10 +908,10 @@ TEST_CASE_METHOD(WindowTestCase, "Window::Refresh", "[window]")
     // Notice that using EventCounter here will give incorrect results,
     // so we have to bind each window to a distinct event handler instead.
 
-    bool isParentPainted;
-    bool isChild1Painted;
-    bool isChild2Painted;
-    bool isChild3Painted;
+    bool isParentPainted = false;
+    bool isChild1Painted = false;
+    bool isChild2Painted = false;
+    bool isChild3Painted = false;
 
     const auto setFlagOnPaint = [](wxWindow* win, bool* flag)
     {
@@ -873,8 +927,22 @@ TEST_CASE_METHOD(WindowTestCase, "Window::Refresh", "[window]")
     setFlagOnPaint(child2, &isChild2Painted);
     setFlagOnPaint(child3, &isChild3Painted);
 
-    // Prepare for the RefreshRect() call below
-    wxYield();
+    // Ensure that none of the windows needs to be redrawn before calling
+    // RefreshRect() below, otherwise child1 could still get repainted even if
+    // we don't refresh it. All of them must be painted at least once because
+    // they were just created, but just calling wxYield() once is not enough
+    // for this, at least under Mac, where painting happens asynchronously and
+    // may be postponed until later, so wait until they're actually painted.
+    //
+    // Note that this also takes care of any repaints still pending for the
+    // parent window because another window overlapping it, created by a
+    // previously running test, was destroyed, as the entire parent is
+    // invalidated by changing its size and background colour above anyhow.
+    WaitFor("initial repaint", [&]()
+    {
+        return isParentPainted &&
+               isChild1Painted && isChild2Painted && isChild3Painted;
+    });
 
     // Now initialize/reset the flags before calling RefreshRect()
     isParentPainted =
@@ -1110,3 +1178,34 @@ TEST_CASE_METHOD(WindowTestCase, "wxWindow::StyleSetWhileHiddenTakesEffect",
 }
 
 #endif // __WXGTK4__
+
+#if defined(__WXMSW__) && wxUSE_ACCESSIBILITY
+
+TEST_CASE("Window::AccessibleName", "[window][accessibility]")
+{
+    auto button = make_unique<wxButton>(wxTheApp->GetTopWindow(), wxID_ANY, "Label");
+    button->SetAccessibleName("Name");
+
+    IAccessible* acc = nullptr;
+    REQUIRE( ::AccessibleObjectFromWindow(GetHwndOf(button.get()),
+                                          static_cast<DWORD>(OBJID_CLIENT),
+                                          IID_IAccessible,
+                                          reinterpret_cast<void**>(&acc)) == S_OK );
+
+    VARIANT self;
+    self.vt = VT_I4;
+    self.lVal = CHILDID_SELF;
+
+    wxBasicString name;
+    CHECK( acc->get_accName(self, name.ByRef()) == S_OK );
+    CHECK( wxString(name) == "Name" );
+
+    button->SetAccessibleName(wxString());
+    wxBasicString defaultName;
+    CHECK( acc->get_accName(self, defaultName.ByRef()) == S_OK );
+    CHECK( wxString(defaultName) == "Label" );
+
+    acc->Release();
+}
+
+#endif // __WXMSW__ && wxUSE_ACCESSIBILITY
