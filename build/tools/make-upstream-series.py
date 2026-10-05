@@ -75,8 +75,20 @@ FORK_ONLY_FILES = (
 # apart.
 HAND_SPLIT = ("01-shared",)
 
-MB  = "0820518c97a13d0905a6e8af16b203d307586107"
-TIP = "gtk4-project/claude/gtk4-wxwidgets-port-plan-pwo52u"
+# The port branch, and the upstream commit the series applies to. Both can be
+# given in the environment, as the remote names differ between checkouts; the
+# base defaults to where the port branch last merged upstream master, which is
+# what makes the series apply to master as it stands.
+TIP = os.environ.get("SERIES_TIP",
+                     "gtk4-project/claude/gtk4-wxwidgets-port-plan-pwo52u")
+MB  = os.environ.get("SERIES_BASE") or subprocess.run(
+        ["git", "merge-base", TIP,
+         os.environ.get("SERIES_UPSTREAM", "upstream/master")],
+        capture_output=True, text=True, check=True).stdout.strip()
+
+# Ends the message of every generated commit.
+TRAILER = os.environ.get("SERIES_TRAILER",
+                         "Co-authored-by: Claude Opus 5 <noreply@anthropic.com>")
 
 def gtk(p, *names):
     return any(p.startswith("src/gtk/"+n) or p.startswith("include/wx/gtk/"+n) for n in names)
@@ -296,7 +308,7 @@ for name, desc, _ in RULES:
            "One step of the GTK4 port, split for review as upstream asked.\n"
            "The series is cumulative: this applies on top of %s and the whole\n"
            "port is the last step of it.\n\n"
-           "Co-authored-by: Claude Opus 5 <noreply@anthropic.com>\n") % (desc, prev if prev==MB else "the previous step")
+           "%s\n") % (desc, prev if prev==MB else "the previous step", TRAILER)
     run("git","commit","-q","-a","-m",msg)
     if handSplit:
         cut  = run("git","rev-parse",target+"^{tree}").strip()
