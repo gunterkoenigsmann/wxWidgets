@@ -701,9 +701,15 @@ public:
                                       roleName);
         }
 
-        wxString name;
+        // The name set with wxWindow::SetAccessibleName() takes precedence
+        // over anything else, but only for the object itself and not its
+        // children.
+        wxString name = m_acc->GetNameOverride();
+        const wxAccStatus nameStatus = name.empty()
+                                        ? m_acc->GetName(wxACC_SELF, &name)
+                                        : wxACC_OK;
         wxGTKUpdateStringProperty(accessible, GTK_ACCESSIBLE_PROPERTY_LABEL,
-                                  m_acc->GetName(wxACC_SELF, &name), name);
+                                  nameStatus, name);
 
         wxString description;
         wxGTKUpdateStringProperty(accessible, GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,

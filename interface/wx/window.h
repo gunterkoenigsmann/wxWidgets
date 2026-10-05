@@ -3736,9 +3736,9 @@ public:
 
         Pass an empty string to use the default name again.
 
-        Currently this function is implemented under MSW, where it requires
-        @c wxUSE_ACCESSIBILITY to be enabled, and macOS. Under the other
-        platforms it doesn't do anything.
+        Currently this function is implemented under MSW and wxGTK with GTK 4,
+        where it requires @c wxUSE_ACCESSIBILITY to be enabled, and macOS.
+        Under the other platforms it doesn't do anything.
 
         @since 3.3.4
     */

@@ -41,8 +41,15 @@ public:
     static void NotifyEvent(int eventType, wxWindow* window,
                             wxAccObject objectType, int objectId);
 
+    // Sets the name used for the object itself instead of the one returned
+    // by GetName(), used by wxWindow::SetAccessibleName().
+    void SetNameOverride(const wxString& name) { m_nameOverride = name; }
+    const wxString& GetNameOverride() const { return m_nameOverride; }
+
 private:
     wxGTKAccessibleImpl* const m_impl;
+
+    wxString m_nameOverride;
 
     wxDECLARE_NO_COPY_CLASS(wxAccessible);
 };
