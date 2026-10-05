@@ -1431,11 +1431,13 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     src/gtk/tooltip.cpp
     src/gtk/toplevel.cpp
     src/gtk/utilsgtk.cpp
+    src/gtk/accessgtk.cpp
     src/gtk/win_gtk.cpp
     src/gtk/window.cpp
     src/gtk/mimetype.cpp
     src/gtk/power.cpp
     src/gtk/wayland.cpp
+    src/gtk/dbusmenu.cpp
 </set>
 <set var="GTK2_LOWLEVEL_SRC" hints="files">
     $(GTK_LOWLEVEL_SRC)
@@ -1447,6 +1449,7 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     $(GTK_PLATFORM_HDR)
     wx/generic/icon.h
     wx/generic/paletteg.h
+    wx/gtk/access.h
     wx/gtk/app.h
     wx/gtk/assertdlg_gtk.h
     wx/gtk/bitmap.h
@@ -1539,6 +1542,9 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     src/gtk/animate.cpp
     src/gtk/srchctrl.cpp
     src/generic/imaglist.cpp
+    src/gtk/statusnotifier.cpp
+    src/generic/dirdlgg.cpp
+    src/generic/filedlgg.cpp
 </set>
 <set var="GTK2_SRC" hints="files">
     $(GTK_SRC)
@@ -1608,6 +1614,8 @@ IMPORTANT: please read docs/tech/tn0016.txt before modifying this file!
     wx/gtk/dvrenderer.h
     wx/gtk/srchctrl.h
     wx/generic/imaglist.h
+    wx/generic/filedlgg.h
+    wx/generic/dirdlgg.h
 </set>
 <set var="GTK2_HDR" hints="files">
     $(GTK_HDR)

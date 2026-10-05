@@ -1317,6 +1317,8 @@ set(GTK_LOWLEVEL_SRC
     src/gtk/window.cpp
     src/gtk/power.cpp
     src/gtk/wayland.cpp
+    src/gtk/accessgtk.cpp
+    src/gtk/dbusmenu.cpp
 )
 
 set(GTK2_LOWLEVEL_SRC
@@ -1354,6 +1356,7 @@ set(GTK_LOWLEVEL_HDR
     wx/gtk/tooltip.h
     wx/gtk/toplevel.h
     wx/gtk/window.h
+    wx/gtk/access.h
 )
 
 set(GTK_SRC
@@ -1423,6 +1426,9 @@ set(GTK_SRC
     src/gtk/hyperlink.cpp
     src/gtk/srchctrl.cpp
     src/generic/imaglist.cpp
+    src/gtk/statusnotifier.cpp
+    src/generic/filedlgg.cpp
+    src/generic/dirdlgg.cpp
 )
 
 set(GTK2_SRC
@@ -1494,6 +1500,8 @@ set(GTK_HDR
     wx/gtk/hyperlink.h
     wx/gtk/srchctrl.h
     wx/generic/imaglist.h
+    wx/generic/filedlgg.h
+    wx/generic/dirdlgg.h
 )
 
 set(GTK2_HDR
