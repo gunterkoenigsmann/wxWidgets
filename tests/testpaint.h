@@ -17,6 +17,10 @@
 #include "wx/utils.h"
 #include "wx/window.h"
 
+#ifdef __WXOSX__
+    #include <CoreGraphics/CoreGraphics.h>
+#endif
+
 // Does this window actually put anything on the screen?
 //
 // This exists because "it compiled and the suite is green" has three times
@@ -40,6 +44,23 @@
 // *right* -- no portable test can -- but it can say there was some.
 //
 // Not suitable for a window that legitimately paints one flat colour.
+
+// Whether this process may read other pixels than its own desktop background
+// from the screen at all.
+//
+// macOS 10.15 and later hand an application without the Screen Recording
+// permission a capture with every window left out, which is not an error and
+// reads exactly like a window that draws nothing. A CI runner has no way to
+// grant it.
+inline bool wxTestCanReadScreen()
+{
+#ifdef __WXOSX__
+    if ( __builtin_available(macOS 10.15, *) )
+        return CGPreflightScreenCaptureAccess();
+#endif
+
+    return true;
+}
 
 // The window's pixels, read back from the screen. Empty if it has no size or
 // the screen cannot be read.

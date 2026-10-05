@@ -228,6 +228,12 @@ TEST_CASE("wxRendererNative::EveryControlDraws", "[renderer]")
         return;
 #endif
 
+    if ( !wxTestCanReadScreen() )
+    {
+        WARN("Skipping: this process is not allowed to read the screen.");
+        return;
+    }
+
     wxWindow* const parent = wxTheApp->GetTopWindow();
     REQUIRE( parent );
 
