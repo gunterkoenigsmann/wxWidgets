@@ -5501,9 +5501,7 @@ COND_TOOLKIT_QT___GUI_SRC_OBJECTS =  \
 	monodll_generic_caret.o \
 	monodll_clrpickerg.o \
 	monodll_collpaneg.o \
-	monodll_dirdlgg.o \
 	monodll_generic_fdrepdlg.o \
-	monodll_filedlgg.o \
 	monodll_filepickerg.o \
 	monodll_fontpickerg.o \
 	monodll_generic_imaglist.o \
@@ -7317,9 +7315,7 @@ COND_TOOLKIT_QT___GUI_SRC_OBJECTS_1 =  \
 	monolib_generic_caret.o \
 	monolib_clrpickerg.o \
 	monolib_collpaneg.o \
-	monolib_dirdlgg.o \
 	monolib_generic_fdrepdlg.o \
-	monolib_filedlgg.o \
 	monolib_filepickerg.o \
 	monolib_fontpickerg.o \
 	monolib_generic_imaglist.o \
@@ -9279,9 +9275,7 @@ COND_TOOLKIT_QT___GUI_SRC_OBJECTS_2 =  \
 	coredll_generic_caret.o \
 	coredll_clrpickerg.o \
 	coredll_collpaneg.o \
-	coredll_dirdlgg.o \
 	coredll_generic_fdrepdlg.o \
-	coredll_filedlgg.o \
 	coredll_filepickerg.o \
 	coredll_fontpickerg.o \
 	coredll_generic_imaglist.o \
@@ -10820,9 +10814,7 @@ COND_TOOLKIT_QT___GUI_SRC_OBJECTS_3 =  \
 	corelib_generic_caret.o \
 	corelib_clrpickerg.o \
 	corelib_collpaneg.o \
-	corelib_dirdlgg.o \
 	corelib_generic_fdrepdlg.o \
-	corelib_filedlgg.o \
 	corelib_filepickerg.o \
 	corelib_fontpickerg.o \
 	corelib_generic_imaglist.o \
