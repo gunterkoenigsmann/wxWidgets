@@ -10216,6 +10216,9 @@ int wxWindowGTK::GetScrollRange( int orient ) const
 
 int wxWindowGTK::GetScrollbarSize( int orient ) const
 {
+    // GTK4 scrolled windows overlay their scrollbars on the contents by
+    // default, so the base class value is used there.
+#ifndef __WXGTK4__
     if ( GTK_IS_SCROLLED_WINDOW(m_widget) )
     {
 #ifdef __WXGTK3__
@@ -10247,6 +10250,7 @@ int wxWindowGTK::GetScrollbarSize( int orient ) const
             return size + wxGetScrollbarSpacing(m_widget);
         }
     }
+#endif // !__WXGTK4__
 
     return wxWindowBase::GetScrollbarSize(orient);
 }
