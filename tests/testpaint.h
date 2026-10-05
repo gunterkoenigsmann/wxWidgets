@@ -17,10 +17,6 @@
 #include "wx/utils.h"
 #include "wx/window.h"
 
-#ifdef __WXOSX__
-    #include <CoreGraphics/CoreGraphics.h>
-#endif
-
 // Does this window actually put anything on the screen?
 //
 // This exists because "it compiled and the suite is green" has three times
@@ -45,21 +41,20 @@
 //
 // Not suitable for a window that legitimately paints one flat colour.
 
-// Whether this process may read other pixels than its own desktop background
-// from the screen at all.
+// Whether wxScreenDC can read the screen back here at all.
 //
-// macOS 10.15 and later hand an application without the Screen Recording
-// permission a capture with every window left out, which is not an error and
-// reads exactly like a window that draws nothing. A CI runner has no way to
-// grant it.
+// wxOSX cannot, when built with the macOS 15 SDK or run on macOS 14.4 or
+// later: CGDisplayCreateImage() is not used there and its replacement is not
+// implemented yet (see wxScreenDCImpl::DoGetAsBitmap()), so every read is a
+// blank bitmap -- which reads exactly like a window that draws nothing. Older
+// systems are not worth telling apart for this.
 inline bool wxTestCanReadScreen()
 {
 #ifdef __WXOSX__
-    if ( __builtin_available(macOS 10.15, *) )
-        return CGPreflightScreenCaptureAccess();
-#endif
-
+    return false;
+#else
     return true;
+#endif
 }
 
 // The window's pixels, read back from the screen. Empty if it has no size or

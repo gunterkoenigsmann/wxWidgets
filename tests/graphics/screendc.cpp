@@ -82,7 +82,7 @@ TEST_CASE("wxScreenDC::ReadBack", "[screendc]")
 
     if ( !wxTestCanReadScreen() )
     {
-        WARN("Skipping: this process is not allowed to read the screen.");
+        WARN("Skipping: wxScreenDC cannot read the screen on this platform.");
         return;
     }
 

@@ -230,7 +230,7 @@ TEST_CASE("wxRendererNative::EveryControlDraws", "[renderer]")
 
     if ( !wxTestCanReadScreen() )
     {
-        WARN("Skipping: this process is not allowed to read the screen.");
+        WARN("Skipping: wxScreenDC cannot read the screen on this platform.");
         return;
     }
 
