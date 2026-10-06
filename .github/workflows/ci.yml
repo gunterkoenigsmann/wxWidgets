@@ -570,6 +570,16 @@ jobs:
           echo core | sudo tee /proc/sys/kernel/core_pattern
           echo 0 | sudo tee /proc/sys/kernel/core_uses_pid
 
+          # WebKitGTK 6.0, the GTK4 one, always runs its web process in a
+          # bubblewrap sandbox, which needs unprivileged user namespaces.
+          # Ubuntu 24.04's AppArmor policy restricts them, bwrap fails to set
+          # up the sandbox's network, and WebKit aborts the test process with
+          # a g_error(), taking the rest of the suite with it.
+          userns=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ "${{ matrix.gtk_version }}" = 4 ] && [ -e $userns ]; then
+            echo 0 | sudo tee $userns
+          fi
+
           # This is exceedingly weird, but for some reason the first test using
           # wxWebView sometimes fails (even if the timeout in the test is
           # increased), so run it before really running the tests -- then they

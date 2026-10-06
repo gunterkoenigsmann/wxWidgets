@@ -80,6 +80,12 @@ TEST_CASE("wxScreenDC::ReadBack", "[screendc]")
         return;
 #endif
 
+    if ( !wxTestCanReadScreen() )
+    {
+        WARN("Skipping: wxScreenDC cannot read the screen on this platform.");
+        return;
+    }
+
     // The application's own window is what gets read: it is on the screen for
     // the whole run, which a window put up for this test is not necessarily --
     // with no window manager there is nothing to keep one in front of whatever

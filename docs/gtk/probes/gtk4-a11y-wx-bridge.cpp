@@ -190,6 +190,8 @@ private:
         // column header is a child id with no window behind it.
         CheckGrid(win->GetParent());
 
+        CheckAccessibleName(win->GetParent());
+
         // A window with no wxAccessible must be left entirely alone.
         wxWindow* const plain = new wxWindow(win->GetParent(), wxID_ANY);
         GtkAccessible* const plainSelf = GTK_ACCESSIBLE(plain->GetConnectWidget());
@@ -204,6 +206,11 @@ private:
         wxGrid* const grid = new wxGrid(parent, wxID_ANY);
         grid->CreateGrid(3, 2);
         grid->SetCellValue(0, 0, "hello");
+
+        // A control's description reaches GTK from the event loop, once its
+        // construction has finished, not from wxACC_EVENT_OBJECT_CREATE
+        // itself: see wxAccessible::NotifyEvent().
+        wxTheApp->Yield();
 
         GtkAccessible* const self = GTK_ACCESSIBLE(grid->GetConnectWidget());
 
@@ -237,6 +244,33 @@ private:
         Check(foundCellValue, "a wxGrid cell's value reaches GTK");
 
         grid->Destroy();
+    }
+
+    // wxWindow::SetAccessibleName() on a native control that has no
+    // wxAccessible of its own: the name replaces the label, and an empty one
+    // gives the control back whatever GTK reported before.
+    void CheckAccessibleName(wxWindow* parent)
+    {
+        wxButton* const button = new wxButton(parent, wxID_ANY, "Label");
+        GtkAccessible* const self = GTK_ACCESSIBLE(button->GetConnectWidget());
+
+        const bool hadLabel = gtk_test_accessible_has_property(
+            self, GTK_ACCESSIBLE_PROPERTY_LABEL);
+
+        button->SetAccessibleName("Name");
+
+        char* mismatch = gtk_test_accessible_check_property(
+            self, GTK_ACCESSIBLE_PROPERTY_LABEL, "Name");
+        Check(mismatch == nullptr, "SetAccessibleName() reaches GTK");
+        g_free(mismatch);
+
+        button->SetAccessibleName(wxString());
+
+        Check(gtk_test_accessible_has_property(
+                self, GTK_ACCESSIBLE_PROPERTY_LABEL) == hadLabel,
+              "an empty SetAccessibleName() restores the default");
+
+        button->Destroy();
     }
 };
 

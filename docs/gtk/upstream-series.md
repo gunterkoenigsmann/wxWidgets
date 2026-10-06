@@ -51,27 +51,27 @@ job before the port lands is a question for them, and it is #106's.
 
 | step | branch | files | + | − | what it is |
 |---|---|---:|---:|---:|---|
-| 1 | `01-shared` | 33 | 542 | 36 | the changes outside the GTK backend, as 29 commits |
+| 1 | `01-shared` | 28 | 427 | 28 | the changes outside the GTK backend, as 23 commits |
 | 2 | `02-private` | 21 | 1865 | 11 | private headers and the GTK+ 3 compatibility shim |
-| 3 | `03-core` | 8 | 4216 | 301 | wxWindow, the event loop and the wxPizza container |
-| 4 | `04-toplevel` | 9 | 1575 | 105 | top level windows, frames, dialogs and popups |
+| 3 | `03-core` | 8 | 4331 | 307 | wxWindow, the event loop and the wxPizza container |
+| 4 | `04-toplevel` | 9 | 1586 | 110 | top level windows, frames, dialogs and popups |
 | 5 | `05-drawing` | 9 | 1415 | 37 | device contexts, the renderer and overlays |
-| 6 | `06-menus` | 5 | 1822 | 42 | menus on GMenuModel and GAction |
-| 7 | `07-text` | 10 | 2004 | 52 | text entry and text control |
-| 8 | `08-items` | 12 | 2206 | 160 | item containers |
-| 9 | `09-controls` | 42 | 3505 | 209 | the remaining controls |
+| 6 | `06-menus` | 5 | 1746 | 87 | menus on GMenuModel and GAction |
+| 7 | `07-text` | 10 | 1869 | 52 | text entry and text control |
+| 8 | `08-items` | 12 | 2228 | 160 | item containers |
+| 9 | `09-controls` | 42 | 3507 | 212 | the remaining controls |
 | 10 | `10-dialogs` | 10 | 774 | 32 | the standard dialogs |
 | 11 | `11-clipboard` | 4 | 1244 | 4 | clipboard and drag and drop |
 | 12 | `12-a11y` | 2 | 1011 | 0 | accessibility |
 | 13 | `13-taskbar` | 3 | 1227 | 43 | the taskbar icon and the status notifier |
 | 14 | `14-webview` | 4 | 580 | 77 | wxWebView on WebKitGTK 6 |
-| 15 | `15-rest` | 5 | 97 | 8 | the last of the backend |
-| 16 | `16-tests` | 35 | 2492 | 130 | tests and samples |
-| 17 | `17-build` | 19 | 1298 | 40 | the build system and the configure switch |
-| 18 | `18-ci` | 9 | 2463 | 9 | a CI job for the new toolkit, and what it runs |
+| 15 | `15-rest` | 15 | 420 | 33 | the last of the backend |
+| 16 | `16-tests` | 35 | 2486 | 123 | tests and samples |
+| 17 | `17-build` | 19 | 1310 | 42 | the build system and the configure switch |
+| 18 | `18-ci` | 10 | 2592 | 9 | a CI job for the new toolkit, and what it runs |
 
-31,722 insertions across 250 files. The largest step is 4,216 lines and the
-median is 1,536, which is the size the request asked for.
+30,618 insertions across 246 files. The largest step is 4,331 lines and the
+median is 1,500, which is the size the request asked for.
 
 ## Why this order
 
@@ -157,13 +157,23 @@ there are no later corrections to fold in, because each file appears once.
 
 ## What it is based on
 
-The series starts at `0820518` (1 September), which is upstream master. The
-port branch was merged with it first, so this applies to master as it stands
-rather than to where the fork left it in August. Eight files conflicted in
-that merge; the resolutions are in its commit message.
+The series starts at `fb2e182` (4 October), which is upstream master. The
+port branch was merged with it first, so this applies to master as it stands.
+Eight files conflicted in that merge; the resolutions are in its commit
+message.
 
-Four files left `01-shared` in the rebasing: upstream has taken those fixes
-from this fork already, so they are no longer part of what is being offered.
+Step 1 was rebased by hand onto the new base. Six of its commits left it
+because upstream has taken those fixes from wxWidgets/wxWidgets#26968, partly
+reworded, and a seventh because the port dropped its workaround once upstream
+had the real fix. One commit came in: the half of the AUI mouse capture fix that
+wxWidgets/wxWidgets#27025 did not take.
+
+The first cut, on `0820518` (1 September), lost four files from step 1 the
+same way.
+
+This cut is on the fork as `upstream-series-next/*`. `upstream-series/01-shared`
+is what wxWidgets/wxWidgets#26968 was opened from, so it is replaced only once
+that is settled.
 
 ## What was verified
 
@@ -171,14 +181,13 @@ from this fork already, so they are no longer part of what is being offered.
 |---|---|
 | the split loses nothing | `git diff upstream-series/18-ci <port> -- . ':!docs' ':!CLAUDE.md' ':!.github' ':!<the three scripts below>'` is **empty** |
 | step 1 keeps the existing build green | GTK+ 3, configured and built from a clean directory at that step: **rc=0** |
-| step 16 keeps it green | the whole port except the build system, GTK+ 3, clean configure: **rc=0** |
-| the series produces the port | step 17 under GTK4: builds, and the GUI suite passes **554 cases, 43,000 assertions** |
-| **every step in between builds too** | all 18 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors, 0 warnings** each |
-| and under a toolkit with no GTK in it | steps 1 to 16 under **Qt**, all green. Steps 17 and 18 do **not** build there -- see below |
-| the port still passes on the new base | GTK4 **917 cases**, GTK+ 3 **902 cases**, both all passing; pristine upstream master as a control: **878**, all passing |
+| **every step after it builds too** | all 18 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors** each, and **0 warnings** in steps 17 and 18, the two whose logs the script keeps |
+| the series produces the port | the port under GTK4 from a clean directory, with `--enable-accessibility` and the three build fixes made after this cut: the GUI suite passes **955 cases, 49,126 assertions**, and the wxAccessible bridge probe passes |
+| the port still passes on the new base | GTK+ 3 from a clean directory: **940 cases**, all passing |
+| and under a toolkit with no GTK in it | **not rechecked** for this cut: no Qt here. It last held for steps 1 to 16 |
 
-That last row replaces an argument that was wrong. It used to say steps 2 to 15
-did not need building because each is a subset of what step 16 contains and
+The row on every step replaces an argument that was wrong. It used to say
+steps 2 to 15 did not need building because each is a subset of what step 16 contains and
 step 16 is green -- true of the file *contents*, and no use, because a step is
 also missing everything the later steps bring. `src/gtk/window.cpp` arrives in
 step 3 and calls `wxGtkScrollbarGetAdjustment()`, which is declared in

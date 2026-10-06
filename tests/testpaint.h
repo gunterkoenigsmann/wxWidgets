@@ -41,6 +41,22 @@
 //
 // Not suitable for a window that legitimately paints one flat colour.
 
+// Whether wxScreenDC can read the screen back here at all.
+//
+// wxOSX cannot, when built with the macOS 15 SDK or run on macOS 14.4 or
+// later: CGDisplayCreateImage() is not used there and its replacement is not
+// implemented yet (see wxScreenDCImpl::DoGetAsBitmap()), so every read is a
+// blank bitmap -- which reads exactly like a window that draws nothing. Older
+// systems are not worth telling apart for this.
+inline bool wxTestCanReadScreen()
+{
+#ifdef __WXOSX__
+    return false;
+#else
+    return true;
+#endif
+}
+
 // The window's pixels, read back from the screen. Empty if it has no size or
 // the screen cannot be read.
 inline wxBitmap wxTestCaptureWindow(wxWindow* win)
