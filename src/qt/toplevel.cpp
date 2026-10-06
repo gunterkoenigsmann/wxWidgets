@@ -24,6 +24,15 @@ wxTopLevelWindowQt::wxTopLevelWindowQt(wxWindow *parent,
     Create( parent, winId, title, pos, size, style, name );
 }
 
+wxTopLevelWindowQt::~wxTopLevelWindowQt()
+{
+    // Send the destroy event while this object is still a wxTopLevelWindow,
+    // as the other ports do: handlers of this event, such as wxPersistentTLW
+    // saving the window geometry, call wxTopLevelWindow methods on it, which
+    // is not possible any more by the time ~wxWindow sends it.
+    SendDestroyEvent();
+}
+
 bool wxTopLevelWindowQt::Create( wxWindow *parent, wxWindowID winId,
     const wxString &title, const wxPoint &pos, const wxSize &size,
     long style, const wxString &name )

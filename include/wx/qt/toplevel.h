@@ -22,6 +22,8 @@ public:
                long style = wxDEFAULT_FRAME_STYLE,
                const wxString& name = wxASCII_STR(wxFrameNameStr));
 
+    virtual ~wxTopLevelWindowQt();
+
     bool Create(wxWindow *parent,
                 wxWindowID id,
                 const wxString& title,
