@@ -2747,6 +2747,29 @@ static void SendSetCursorEvent(wxWindowGTK* win, int x, int y)
     }
     if (win->m_needCursorReset)
         win->GTKUpdateCursor();
+
+#ifdef __WXGTK4__
+    // A cursor which a wxEVT_SET_CURSOR handler chose for a parent is set on
+    // the parent's widget, and GTK4 shows it over every descendant that does
+    // not set a cursor of its own -- there are no child GdkWindows any more
+    // to hide it. Nor does the parent get a leave event when the pointer
+    // moves into a child, which is where GTK3 reset it: the parent's motion
+    // controller still contains the pointer. So the resize cursor wxAUI sets
+    // over a sash would stay over the pane next to it for as long as the
+    // pointer remained inside it.
+    //
+    // Nobody wants a special cursor at this position, or win would have got
+    // it above, so none of the ancestors' ones applies here either.
+    for ( wxWindowGTK* p = win; !p->IsTopLevel(); )
+    {
+        p = p->GetParent();
+        if ( !p )
+            break;
+
+        if ( p->m_needCursorReset )
+            p->GTKUpdateCursor();
+    }
+#endif // __WXGTK4__
 }
 
 //-----------------------------------------------------------------------------
