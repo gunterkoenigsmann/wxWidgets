@@ -69,7 +69,8 @@ before pushing.
   harness. 32 of the 33 failures reported in #262 were this.
 * No `libxtst-dev`, no input tests: configure then disables
   wxUIActionSimulator with only a warning, and `test_gui` quietly runs
-  54 fewer cases. `.claude/hooks/session-start.sh` installs it.
+  54 fewer cases. CI's GTK4 job ran like that until #264;
+  `build/tools/before_install.sh` installs it now.
 * `make -C tests test_gui` does not depend on the library, so it can
   report "up to date" and leave a binary older than the change under
   test. `rm -f tests/test_gui` first, every time.

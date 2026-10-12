@@ -13,11 +13,9 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}"
 # back to system libraries, or leaves features out, and the build differs.
 git submodule update --init --recursive --depth 1
 
-# The packages CI installs for the GTK4 job, the GTK+ 3 headers for a
-# control build, and XTest. GitHub's runners have XTest preinstalled; without it configure
-# silently disables wxUIActionSimulator and every test that synthesises
-# input is compiled out of test_gui.
-wxGTK_VERSION=4 WX_EXTRA_PACKAGES="libxtst-dev libgtk-3-dev" \
+# The packages CI installs for the GTK4 job, and the GTK+ 3 headers for a
+# control build.
+wxGTK_VERSION=4 WX_EXTRA_PACKAGES="libgtk-3-dev" \
     ./build/tools/before_install.sh
 
 # What CI's Xvfb jobs set; see CLAUDE.md.
