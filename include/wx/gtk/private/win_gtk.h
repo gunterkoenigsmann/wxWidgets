@@ -35,6 +35,19 @@ struct WXDLLIMPEXP_CORE wxPizza
     void remove(GtkWidget* widget);
 #endif
     void scroll(int dx, int dy);
+#ifdef __WXGTK4__
+    // GTK4 redraws a widget whole and tells it nothing about what changed, so
+    // wx keeps track of that itself: invalidate() records what needs
+    // repainting and paint() repaints just that part of the last frame, which
+    // is what keeps wxWindow::GetUpdateRegion() as narrow as RefreshRect()
+    // asked for. A null rectangle, like invalidate_all(), means everything.
+    void invalidate(const GdkRectangle* rect);
+    void invalidate_all() { invalidate(nullptr); }
+    void snapshot_content(wxWindow* win, GtkSnapshot* snapshot,
+                          int width, int height);
+    void paint(wxWindow* win, cairo_t* cr, int width, int height);
+    void drop_retained();
+#endif
     void get_border(GtkBorder& border);
     void size_allocate_child(
         GtkWidget* child, int x, int y, int width, int height, int parent_width = -1);
@@ -44,6 +57,20 @@ struct WXDLLIMPEXP_CORE wxPizza
     int m_scroll_x;
     int m_scroll_y;
     int m_windowStyle;
+#ifdef __WXGTK4__
+    // The render node snapshot_content() last produced, and the scale it was
+    // produced at; see snapshot_content().
+    GskRenderNode* m_node;
+    int m_nodeScale;
+    // The last frame paint() produced, kept only once a partial invalidation
+    // has made it worth its memory; see paint().
+    cairo_surface_t* m_retained;
+    // What has been invalidated since the last paint(): m_damage if only
+    // parts, m_damageAll if everything.
+    cairo_region_t* m_damage;
+    bool m_damageAll;
+    bool m_retain;
+#endif
 };
 
 #endif // _WX_GTK_PIZZA_H_

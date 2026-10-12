@@ -1648,6 +1648,10 @@ is an assumption, not yet verified". Checked, and it is **partly wrong**:
   `m_updateRegion` from one rect — and in practice GTK3 tended to damage the
   whole window regardless. So this narrows an already-coarse guarantee rather
   than removing a precise one. See the Phase 4 design doc section 3.
+
+  **Since restored.** `wxPizza` now keeps the last frame it painted and
+  repaints only what wx invalidated, so `RefreshRect()` gives back exactly its
+  rectangle as the update region again. See the design doc section 3.1.
 - **Freezing a native control does nothing.** GTK3 intercepted the draw signal
   ahead of the widget's own handler; a GTK4 snapshot vfunc cannot be
   intercepted from outside, so only `wxPizza` widgets can be frozen.
