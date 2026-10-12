@@ -2352,7 +2352,7 @@ bool wxRichTextCtrl::MoveDown(int noLines, int flags)
         if (lineObj)
         {
             pt.y = lineObj->GetAbsolutePosition().y + 2;
-            if (lineObj->GetRange().GetStart() == lineObj->GetRange().GetEnd())
+            if ( lineObj->GetRange().GetLength() == 0 )
                 lineIsEmpty = true;
         }
         else
@@ -4491,7 +4491,7 @@ bool wxRichTextCtrl::DoesSelectionHaveTextEffectFlag(int flag)
         {
             if (IsDefaultStyleShowing())
                 wxRichTextApplyStyle(attr, GetDefaultStyleEx());
-            return (attr.GetTextEffectFlags() & flag) != 0;
+            return (attr.GetTextEffects() & flag) != 0;
         }
     }
     return false;

@@ -84,8 +84,8 @@ wxCFLAGS_C99 = @wxCFLAGS_C99@
 DESTDIR = 
 WX_RELEASE = 3.3
 WX_RELEASE_NODOT = 33
-WX_VERSION = $(WX_RELEASE).4
-WX_VERSION_NODOT = $(WX_RELEASE_NODOT)4
+WX_VERSION = $(WX_RELEASE).5
+WX_VERSION_NODOT = $(WX_RELEASE_NODOT)5
 LIBDIRNAME = $(wx_top_builddir)/lib
 WXREGEX_CFLAGS = -I$(wx_top_builddir)/3rdparty/pcre/src -D__WX__ \
 	-DHAVE_CONFIG_H -DPCRE2_CODE_UNIT_WIDTH=$(wxPCRE2_CODE_UNIT_WIDTH) \
@@ -584,15 +584,18 @@ WXLEXILLA_OBJECTS =  \
 	wxlexilla_WordList.o \
 	wxlexilla_Lexilla.o
 WXLUNASVG_CFLAGS = -I$(top_srcdir)/3rdparty/lunasvg/include \
-	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/include $(WX_CPPFLAGS) -DNDEBUG \
+	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/include \
+	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/source $(WX_CPPFLAGS) -DNDEBUG \
 	$(WX_CFLAGS) $(____SHARED) $(CPPFLAGS) $(CFLAGS)
 WXLUNASVG_CXXFLAGS = -I$(top_srcdir)/3rdparty/lunasvg/include \
-	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/include $(WX_CPPFLAGS) -DNDEBUG \
+	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/include \
+	-I$(top_srcdir)/3rdparty/lunasvg/plutovg/source $(WX_CPPFLAGS) -DNDEBUG \
 	$(WX_CXXFLAGS) $(____SHARED) $(CPPFLAGS) $(CXXFLAGS)
 WXLUNASVG_OBJECTS =  \
 	wxlunasvg_lunasvg.o \
 	wxlunasvg_graphics.o \
 	wxlunasvg_svgelement.o \
+	wxlunasvg_svgfilterelement.o \
 	wxlunasvg_svggeometryelement.o \
 	wxlunasvg_svglayoutstate.o \
 	wxlunasvg_svgpaintelement.o \
@@ -608,6 +611,7 @@ WXLUNASVG_OBJECTS =  \
 	wxlunasvg_plutovg_path.o \
 	wxlunasvg_plutovg_rasterize.o \
 	wxlunasvg_plutovg_surface.o \
+	wxlunasvg_plutovg_filter.o \
 	wxlunasvg_plutovg_ft_math.o \
 	wxlunasvg_plutovg_ft_raster.o \
 	wxlunasvg_plutovg_ft_stroker.o
@@ -780,6 +784,7 @@ ALL_BASE_HEADERS =  \
 	wx/localedefs.h \
 	wx/uilocale.h \
 	wx/fs_data.h \
+	wx/stdformat.h \
 	$(BASE_PLATFORM_HDR) \
 	wx/fs_inet.h \
 	wx/protocol/file.h \
@@ -966,6 +971,7 @@ ALL_PORTS_BASE_HEADERS =  \
 	wx/localedefs.h \
 	wx/uilocale.h \
 	wx/fs_data.h \
+	wx/stdformat.h \
 	wx/unix/fswatcher_inotify.h \
 	wx/unix/stdpaths.h \
 	wx/unix/mimetype.h \
@@ -2297,6 +2303,8 @@ RIBBONDLL_OBJECTS =  \
 	ribbondll_art_msw.o \
 	ribbondll_art_aui.o \
 	ribbondll_art_msw_flat.o \
+	ribbondll_backstage.o \
+	ribbondll_backstagecontrols.o \
 	ribbondll_bar.o \
 	ribbondll_buttonbar.o \
 	ribbondll_control.o \
@@ -2317,6 +2325,8 @@ RIBBONLIB_OBJECTS =  \
 	ribbonlib_art_msw.o \
 	ribbonlib_art_aui.o \
 	ribbonlib_art_msw_flat.o \
+	ribbonlib_backstage.o \
+	ribbonlib_backstagecontrols.o \
 	ribbonlib_bar.o \
 	ribbonlib_buttonbar.o \
 	ribbonlib_control.o \
@@ -4034,12 +4044,15 @@ COND_USE_GUI_1_ALL_GUI_HEADERS =  \
 	wx/xrc/xh_propgrid.h \
 	wx/ribbon/art.h \
 	wx/ribbon/art_internal.h \
+	wx/ribbon/backstage.h \
+	wx/ribbon/backstagecontrols.h \
 	wx/ribbon/bar.h \
 	wx/ribbon/buttonbar.h \
 	wx/ribbon/control.h \
 	wx/ribbon/gallery.h \
 	wx/ribbon/page.h \
 	wx/ribbon/panel.h \
+	wx/ribbon/private/backstage.h \
 	wx/ribbon/toolbar.h \
 	wx/xrc/xh_ribbon.h \
 	wx/richtext/richtextbackgroundpage.h \
@@ -4358,6 +4371,8 @@ COND_USE_GUI_1___MONOLIB_GUI_SRC_OBJECTS =  \
 	monodll_art_msw.o \
 	monodll_art_aui.o \
 	monodll_art_msw_flat.o \
+	monodll_backstage.o \
+	monodll_backstagecontrols.o \
 	monodll_bar.o \
 	monodll_ribbon_buttonbar.o \
 	monodll_ribbon_control.o \
@@ -6172,6 +6187,8 @@ COND_USE_GUI_1___MONOLIB_GUI_SRC_OBJECTS_1 =  \
 	monolib_art_msw.o \
 	monolib_art_aui.o \
 	monolib_art_msw_flat.o \
+	monolib_backstage.o \
+	monolib_backstagecontrols.o \
 	monolib_bar.o \
 	monolib_ribbon_buttonbar.o \
 	monolib_ribbon_control.o \
@@ -12969,17 +12986,17 @@ COND_MONOLITHIC_0_SHARED_1_USE_GUI_1_USE_HTML_1___htmldll_library_link_LIBR_0 \
 @COND_USE_EXCEPTIONS_0@__EXCEPTIONS_DEFINE_p_65 = --define wxNO_EXCEPTIONS
 @COND_USE_RTTI_0@__RTTI_DEFINE_p_65 = --define wxNO_RTTI
 @COND_USE_THREADS_0@__THREAD_DEFINE_p_65 = --define wxNO_THREADS
-@COND_PLATFORM_MACOSX_0_USE_SOVERSION_1@dll___targetsuf2 = .$(SO_SUFFIX).4
-@COND_PLATFORM_MACOSX_1_USE_SOVERSION_1@dll___targetsuf2 = .4.$(SO_SUFFIX)
+@COND_PLATFORM_MACOSX_0_USE_SOVERSION_1@dll___targetsuf2 = .$(SO_SUFFIX).5
+@COND_PLATFORM_MACOSX_1_USE_SOVERSION_1@dll___targetsuf2 = .5.$(SO_SUFFIX)
 @COND_USE_SOVERSION_0@dll___targetsuf2 = .$(SO_SUFFIX)
 @COND_PLATFORM_MACOSX_0_USE_SOVERCYGWIN_0_USE_SOVERSION_1@dll___targetsuf3 \
 @COND_PLATFORM_MACOSX_0_USE_SOVERCYGWIN_0_USE_SOVERSION_1@	= \
-@COND_PLATFORM_MACOSX_0_USE_SOVERCYGWIN_0_USE_SOVERSION_1@	.$(SO_SUFFIX).4.0.0
+@COND_PLATFORM_MACOSX_0_USE_SOVERCYGWIN_0_USE_SOVERSION_1@	.$(SO_SUFFIX).5.0.0
 @COND_PLATFORM_MACOSX_1_USE_SOVERSION_1@dll___targetsuf3 \
-@COND_PLATFORM_MACOSX_1_USE_SOVERSION_1@	= .4.0.0.$(SO_SUFFIX)
-@COND_USE_SOVERCYGWIN_1_USE_SOVERSION_1@dll___targetsuf3 = -4.$(SO_SUFFIX)
+@COND_PLATFORM_MACOSX_1_USE_SOVERSION_1@	= .5.0.0.$(SO_SUFFIX)
+@COND_USE_SOVERCYGWIN_1_USE_SOVERSION_1@dll___targetsuf3 = -5.$(SO_SUFFIX)
 @COND_USE_SOVERSION_0@dll___targetsuf3 = .$(SO_SUFFIX)
-@COND_USE_SOVERSION_1_USE_SOVERSOLARIS_1@dll___targetsuf3 = .$(SO_SUFFIX).4
+@COND_USE_SOVERSION_1_USE_SOVERSOLARIS_1@dll___targetsuf3 = .$(SO_SUFFIX).5
 @COND_TOOLKIT_MSW@__RCDEFDIR_p = --include-dir \
 @COND_TOOLKIT_MSW@	$(LIBDIRNAME)/wx/include/$(TOOLCHAIN_FULLNAME)
 @COND_USE_GUI_1_wxUSE_LIBTIFF_builtin@__LIB_TIFF_p \
@@ -15388,6 +15405,9 @@ wxlunasvg_graphics.o: $(srcdir)/3rdparty/lunasvg/source/graphics.cpp
 wxlunasvg_svgelement.o: $(srcdir)/3rdparty/lunasvg/source/svgelement.cpp
 	$(CXXC) -c -o $@ $(WXLUNASVG_CXXFLAGS) $(srcdir)/3rdparty/lunasvg/source/svgelement.cpp
 
+wxlunasvg_svgfilterelement.o: $(srcdir)/3rdparty/lunasvg/source/svgfilterelement.cpp
+	$(CXXC) -c -o $@ $(WXLUNASVG_CXXFLAGS) $(srcdir)/3rdparty/lunasvg/source/svgfilterelement.cpp
+
 wxlunasvg_svggeometryelement.o: $(srcdir)/3rdparty/lunasvg/source/svggeometryelement.cpp
 	$(CXXC) -c -o $@ $(WXLUNASVG_CXXFLAGS) $(srcdir)/3rdparty/lunasvg/source/svggeometryelement.cpp
 
@@ -15432,6 +15452,9 @@ wxlunasvg_plutovg_rasterize.o: $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg
 
 wxlunasvg_plutovg_surface.o: $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-surface.c
 	$(CCC) -c -o $@ $(WXLUNASVG_CFLAGS) $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-surface.c
+
+wxlunasvg_plutovg_filter.o: $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-filter.c
+	$(CCC) -c -o $@ $(WXLUNASVG_CFLAGS) $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-filter.c
 
 wxlunasvg_plutovg_ft_math.o: $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-ft-math.c
 	$(CCC) -c -o $@ $(WXLUNASVG_CFLAGS) $(srcdir)/3rdparty/lunasvg/plutovg/source/plutovg-ft-math.c
@@ -17097,6 +17120,12 @@ monodll_art_aui.o: $(srcdir)/src/ribbon/art_aui.cpp $(MONODLL_ODEP)
 
 monodll_art_msw_flat.o: $(srcdir)/src/ribbon/art_msw_flat.cpp $(MONODLL_ODEP)
 	$(CXXC) -c -o $@ $(MONODLL_CXXFLAGS) $(srcdir)/src/ribbon/art_msw_flat.cpp
+
+monodll_backstage.o: $(srcdir)/src/ribbon/backstage.cpp $(MONODLL_ODEP)
+	$(CXXC) -c -o $@ $(MONODLL_CXXFLAGS) $(srcdir)/src/ribbon/backstage.cpp
+
+monodll_backstagecontrols.o: $(srcdir)/src/ribbon/backstagecontrols.cpp $(MONODLL_ODEP)
+	$(CXXC) -c -o $@ $(MONODLL_CXXFLAGS) $(srcdir)/src/ribbon/backstagecontrols.cpp
 
 monodll_bar.o: $(srcdir)/src/ribbon/bar.cpp $(MONODLL_ODEP)
 	$(CXXC) -c -o $@ $(MONODLL_CXXFLAGS) $(srcdir)/src/ribbon/bar.cpp
@@ -21933,6 +21962,12 @@ monolib_art_aui.o: $(srcdir)/src/ribbon/art_aui.cpp $(MONOLIB_ODEP)
 
 monolib_art_msw_flat.o: $(srcdir)/src/ribbon/art_msw_flat.cpp $(MONOLIB_ODEP)
 	$(CXXC) -c -o $@ $(MONOLIB_CXXFLAGS) $(srcdir)/src/ribbon/art_msw_flat.cpp
+
+monolib_backstage.o: $(srcdir)/src/ribbon/backstage.cpp $(MONOLIB_ODEP)
+	$(CXXC) -c -o $@ $(MONOLIB_CXXFLAGS) $(srcdir)/src/ribbon/backstage.cpp
+
+monolib_backstagecontrols.o: $(srcdir)/src/ribbon/backstagecontrols.cpp $(MONOLIB_ODEP)
+	$(CXXC) -c -o $@ $(MONOLIB_CXXFLAGS) $(srcdir)/src/ribbon/backstagecontrols.cpp
 
 monolib_bar.o: $(srcdir)/src/ribbon/bar.cpp $(MONOLIB_ODEP)
 	$(CXXC) -c -o $@ $(MONOLIB_CXXFLAGS) $(srcdir)/src/ribbon/bar.cpp
@@ -34645,6 +34680,12 @@ ribbondll_art_aui.o: $(srcdir)/src/ribbon/art_aui.cpp $(RIBBONDLL_ODEP)
 ribbondll_art_msw_flat.o: $(srcdir)/src/ribbon/art_msw_flat.cpp $(RIBBONDLL_ODEP)
 	$(CXXC) -c -o $@ $(RIBBONDLL_CXXFLAGS) $(srcdir)/src/ribbon/art_msw_flat.cpp
 
+ribbondll_backstage.o: $(srcdir)/src/ribbon/backstage.cpp $(RIBBONDLL_ODEP)
+	$(CXXC) -c -o $@ $(RIBBONDLL_CXXFLAGS) $(srcdir)/src/ribbon/backstage.cpp
+
+ribbondll_backstagecontrols.o: $(srcdir)/src/ribbon/backstagecontrols.cpp $(RIBBONDLL_ODEP)
+	$(CXXC) -c -o $@ $(RIBBONDLL_CXXFLAGS) $(srcdir)/src/ribbon/backstagecontrols.cpp
+
 ribbondll_bar.o: $(srcdir)/src/ribbon/bar.cpp $(RIBBONDLL_ODEP)
 	$(CXXC) -c -o $@ $(RIBBONDLL_CXXFLAGS) $(srcdir)/src/ribbon/bar.cpp
 
@@ -34680,6 +34721,12 @@ ribbonlib_art_aui.o: $(srcdir)/src/ribbon/art_aui.cpp $(RIBBONLIB_ODEP)
 
 ribbonlib_art_msw_flat.o: $(srcdir)/src/ribbon/art_msw_flat.cpp $(RIBBONLIB_ODEP)
 	$(CXXC) -c -o $@ $(RIBBONLIB_CXXFLAGS) $(srcdir)/src/ribbon/art_msw_flat.cpp
+
+ribbonlib_backstage.o: $(srcdir)/src/ribbon/backstage.cpp $(RIBBONLIB_ODEP)
+	$(CXXC) -c -o $@ $(RIBBONLIB_CXXFLAGS) $(srcdir)/src/ribbon/backstage.cpp
+
+ribbonlib_backstagecontrols.o: $(srcdir)/src/ribbon/backstagecontrols.cpp $(RIBBONLIB_ODEP)
+	$(CXXC) -c -o $@ $(RIBBONLIB_CXXFLAGS) $(srcdir)/src/ribbon/backstagecontrols.cpp
 
 ribbonlib_bar.o: $(srcdir)/src/ribbon/bar.cpp $(RIBBONLIB_ODEP)
 	$(CXXC) -c -o $@ $(RIBBONLIB_CXXFLAGS) $(srcdir)/src/ribbon/bar.cpp

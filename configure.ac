@@ -13,7 +13,7 @@ dnl ---------------------------------------------------------------------------
 dnl initialization
 dnl ---------------------------------------------------------------------------
 
-AC_INIT([wxWidgets], [3.3.4], [wx-dev@googlegroups.com])
+AC_INIT([wxWidgets], [3.3.5], [wx-dev@googlegroups.com])
 
 dnl the file passed to AC_CONFIG_SRCDIR should be specific to our package
 AC_CONFIG_SRCDIR([wx-config.in])
@@ -39,7 +39,7 @@ dnl wx_release_number += 1
 
 wx_major_version_number=3
 wx_minor_version_number=3
-wx_release_number=4
+wx_release_number=5
 wx_subrelease_number=0
 
 WX_RELEASE=$wx_major_version_number.$wx_minor_version_number
@@ -1764,7 +1764,9 @@ if test -n "$LARGEFILE_CPPFLAGS"; then
     fi
 fi
 
-dnl AC_FUNC_FSEEKO sets HAVE_FSEEKO and $ac_cv_sys_largefile_source
+dnl AC_FUNC_FSEEKO sets HAVE_FSEEKO and indicates whether _LARGEFILE_SOURCE is
+dnl needed for fseeko() via $ac_cv_sys_largefile_source in autoconf < 2.72 or
+dnl $ac_cv_func_fseeko_ftello in later versions
 dnl
 dnl it may be affected by large file flags (this happens under HP-UX 11 for
 dnl example) so set them before using it and also use C++ to ensure that we get
@@ -1775,8 +1777,9 @@ CPPFLAGS="$CPPFLAGS $LARGEFILE_CPPFLAGS"
 AC_FUNC_FSEEKO
 CPPFLAGS="$old_CPPFLAGS"
 AC_LANG_POP()
-if test "$ac_cv_sys_largefile_source" != no; then
-    WXCONFIG_CPPFLAGS="$WXCONFIG_CPPFLAGS -D_LARGEFILE_SOURCE=$ac_cv_sys_largefile_source"
+if test "$ac_cv_sys_largefile_source" = 1 || \
+   test "$ac_cv_func_fseeko_ftello" = "need _LARGEFILE_SOURCE"; then
+    WXCONFIG_CPPFLAGS="$WXCONFIG_CPPFLAGS -D_LARGEFILE_SOURCE=1"
 fi
 
 AC_C_BIGENDIAN
@@ -7777,10 +7780,6 @@ if test "$wxUSE_STC" = "yes" ; then
     for lib in scintilla lexilla; do
         WXCONFIG_STC_LIBS="$WXCONFIG_STC_LIBS -lwx${lib}${WX_LIB_FLAVOUR}-${WX_RELEASE}${HOST_SUFFIX}"
     done
-
-    if test "$wxUSE_MSW" = 1 ; then
-        EXTRALIBS_STC="-limm32"
-    fi
 fi
 
 dnl ---------------------------------------------------------------------------
