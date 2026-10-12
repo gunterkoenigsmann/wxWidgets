@@ -587,7 +587,15 @@ void TextCtrlTestCase::HitTestSingleLine()
     // exact tests, just try to verify that the results are roughly as
     // expected.
     const wxSize sizeChar = m_text->GetTextExtent("X");
+#ifdef __WXGTK4__
+    // GTK centres the single line of text vertically in the entry, and only a
+    // point on that line is on the text, so aim for the middle of the control.
+    // It is only known once the control has been laid out.
+    YieldForAWhile();
+    const int yMid = m_text->GetClientSize().y / 2;
+#else
     const int yMid = sizeChar.y / 2;
+#endif
 
     long pos = -1;
 
@@ -619,6 +627,35 @@ void TextCtrlTestCase::HitTestSingleLine()
         CHECK( pos >= 0 );
         CHECK( pos < 3 );
     }
+
+#ifdef __WXGTK__
+    // The text starts inside the control's border and padding, so a point
+    // just short of where the first character would end if the text started
+    // at the very edge of the control is still on (or before) that character,
+    // whatever the font. Counting the inset twice, or not subtracting it,
+    // would land on the second one.
+    SECTION("Inset")
+    {
+        m_text->ChangeValue("WWWW");
+        const int widthW = m_text->GetTextExtent("W").x;
+        CHECK( m_text->HitTest(wxPoint(widthW - 1, yMid), &pos)
+                != wxTE_HT_BEYOND );
+        CHECK( pos == 0 );
+    }
+#endif // __WXGTK__
+
+#ifdef __WXGTK4__
+    // Anywhere on the line vertically is on the text, not only its middle.
+    SECTION("Vertical")
+    {
+        const int x = 2*sizeChar.x;
+        const int dy = sizeChar.y / 3;
+        CHECK( m_text->HitTest(wxPoint(x, yMid - dy), &pos)
+                == wxTE_HT_ON_TEXT );
+        CHECK( m_text->HitTest(wxPoint(x, yMid + dy), &pos)
+                == wxTE_HT_ON_TEXT );
+    }
+#endif // __WXGTK4__
 
     // Hitting a point well beyond the end of the text shouldn't find any valid
     // character.
