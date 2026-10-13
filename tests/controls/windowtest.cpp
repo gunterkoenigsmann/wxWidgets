@@ -350,6 +350,11 @@ TEST_CASE_METHOD(WindowTestCase, "Window::FocusEvent", "[window]")
 }
 
 // Hiding a frame must not take the focus from a window in another one.
+//
+// This is GTK-only: under macOS the focus follows the key window, so showing
+// the other frame takes it there and SetFocus() in the main frame, which is
+// not key, leaves FindFocus() pointing into the other one.
+#ifdef __WXGTK__
 TEST_CASE_METHOD(WindowTestCase, "Window::FocusKeptWhenOtherFrameHidden",
                  "[window][focus]")
 {
@@ -378,6 +383,7 @@ TEST_CASE_METHOD(WindowTestCase, "Window::FocusKeptWhenOtherFrameHidden",
     CHECK( killfocus.GetCount() == 0 );
     CHECK_FOCUS_IS( m_window );
 }
+#endif // __WXGTK__
 
 TEST_CASE_METHOD(WindowTestCase, "Window::Mouse", "[window]")
 {
