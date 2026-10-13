@@ -2536,10 +2536,17 @@ wxTextCtrl::HitTest(const wxPoint& pt, long *pos) const
         // the layout belongs to the private GtkText widget inside the entry
         // and is not reachable from outside any more.
         //
-        // Translating the point into that widget's own coordinate space
-        // accounts for the entry's border, padding and any icons, which is
-        // most of what the layout offset used to provide, and a layout built
-        // from the same widget and text measures identically.
+        // The point arrives in wx client coordinates, whose origin is the
+        // corner of the entry's border box, while a GTK4 widget's own
+        // coordinates start at its content box, inside the border and the
+        // padding. The border box's bounds, expressed in the entry's own
+        // space, give that inset (negated), and adding it makes the point
+        // entry-relative in GTK's sense.
+        //
+        // Translating that into the GtkText's coordinate space then accounts
+        // for any icons before the text, and a layout built from the same
+        // widget and text measures identically, which is most of what the
+        // layout offset used to provide.
         //
         // The rest of it is how far the text has been scrolled, for a value
         // too long to fit. GTK4 has no getter for that either, but
@@ -2560,6 +2567,13 @@ wxTextCtrl::HitTest(const wxPoint& pt, long *pos) const
             }
         }
 
+        graphene_rect_t borderBox;
+        if ( gtk_widget_compute_bounds(m_widget, m_text, &borderBox) )
+        {
+            x += int(borderBox.origin.x);
+            y += int(borderBox.origin.y);
+        }
+
         graphene_point_t ptWidget = GRAPHENE_POINT_INIT(float(x), float(y));
         graphene_point_t ptInText;
         if ( gtk_widget_compute_point(m_text, textWidget,
@@ -2570,9 +2584,9 @@ wxTextCtrl::HitTest(const wxPoint& pt, long *pos) const
         }
 
 #if GTK_CHECK_VERSION(4,4,0)
-        // Only the horizontal offset is taken from this: a single line layout
-        // has just the one line, so its vertical origin makes no difference to
-        // which character a point falls on.
+        // The rectangle's top is where the line starts vertically: GtkText
+        // centres its one line in whatever height it is given, and Pango only
+        // finds a character for a point inside that line.
         if ( GTK_IS_TEXT(textWidget) && gtk_check_version(4,4,0) == nullptr )
         {
             graphene_rect_t strong;
@@ -2580,6 +2594,7 @@ wxTextCtrl::HitTest(const wxPoint& pt, long *pos) const
                                             &strong, nullptr);
 
             x -= int(strong.origin.x);
+            y -= int(strong.origin.y);
         }
 #endif // GTK_CHECK_VERSION(4,4,0)
 
