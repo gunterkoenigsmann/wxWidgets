@@ -2051,10 +2051,10 @@ void wxTopLevelWindowGTK::Refresh( bool WXUNUSED(eraseBackground), const wxRect 
     gtk_widget_queue_draw( m_widget );
 
 #ifdef __WXGTK4__
-    // There is no GdkWindow to invalidate separately: queueing a draw on the
-    // widget is the whole of it now.
+    // There is no GdkWindow to invalidate separately: invalidating the pizza
+    // is the whole of it now.
     if (m_wxwindow)
-        gtk_widget_queue_draw(m_wxwindow);
+        WX_PIZZA(m_wxwindow)->invalidate_all();
 #else
     GdkWindow* window = nullptr;
     if (m_wxwindow)

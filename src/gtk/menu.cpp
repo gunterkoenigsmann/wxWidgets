@@ -295,6 +295,35 @@ static void wx_menu_popover_closed(GtkPopover*, gpointer user_data)
         g_main_loop_quit(data->loop);
 }
 
+// "show" and "hide" of the popover a menu bar opens for one of its menus. The
+// popover only knows its position in the bar, as the menu at that position can
+// change whenever the bar's model is rebuilt.
+static wxMenu* wx_menubar_popover_menu(GtkWidget* popover, wxMenuBar* bar)
+{
+    const size_t pos = GPOINTER_TO_SIZE(
+        g_object_get_data(G_OBJECT(popover), "wx-menubar-pos"));
+
+    return pos < bar->GetMenuCount() ? bar->GetMenu(pos) : nullptr;
+}
+
+static void wx_menubar_popover_show(GtkWidget* popover, wxMenuBar* bar)
+{
+    if ( wxMenu* const menu = wx_menubar_popover_menu(popover, bar) )
+    {
+        wxMenuEvent event(wxEVT_MENU_OPEN, 0, menu);
+        DoCommonMenuCallbackCode(menu, event);
+    }
+}
+
+static void wx_menubar_popover_hide(GtkWidget* popover, wxMenuBar* bar)
+{
+    if ( wxMenu* const menu = wx_menubar_popover_menu(popover, bar) )
+    {
+        wxMenuEvent event(wxEVT_MENU_CLOSE, 0, menu);
+        DoCommonMenuCallbackCode(menu, event);
+    }
+}
+
 } // extern "C"
 
 //-----------------------------------------------------------------------------
@@ -406,6 +435,44 @@ void wxMenuBar::GTKRebuildModel()
             g_menu_append_submenu(m_barModel, title.utf8_str(),
                                   G_MENU_MODEL(empty));
             g_object_unref(empty);
+        }
+    }
+
+    GTKConnectMenuPopovers();
+}
+
+void wxMenuBar::GTKConnectMenuPopovers()
+{
+    // GtkPopoverMenuBar has no signal for a menu being opened, which is what
+    // wxEVT_MENU_OPEN, and through it updating the menu's items, hangs on. Its
+    // popovers have, though: each item it creates for a submenu of the model
+    // owns the GtkPopoverMenu that shows it, as a child widget. The bar
+    // recreates them all when the model above is rebuilt, so they are looked
+    // for again every time.
+    size_t pos = 0;
+    for ( GtkWidget* item = gtk_widget_get_first_child(m_menubar);
+          item;
+          item = gtk_widget_get_next_sibling(item), ++pos )
+    {
+        for ( GtkWidget* child = gtk_widget_get_first_child(item);
+              child;
+              child = gtk_widget_get_next_sibling(child) )
+        {
+            if ( !GTK_IS_POPOVER(child) )
+                continue;
+
+            g_object_set_data(G_OBJECT(child), "wx-menubar-pos",
+                              GSIZE_TO_POINTER(pos));
+
+            if ( g_object_get_data(G_OBJECT(child), "wx-menubar-connected") )
+                continue;
+
+            g_object_set_data(G_OBJECT(child), "wx-menubar-connected",
+                              GINT_TO_POINTER(1));
+            g_signal_connect(child, "show",
+                             G_CALLBACK(wx_menubar_popover_show), this);
+            g_signal_connect(child, "hide",
+                             G_CALLBACK(wx_menubar_popover_hide), this);
         }
     }
 }
@@ -1097,11 +1164,15 @@ void wxMenuItem::ClearExtraAccels()
 
 bool wxMenuItem::GTKActivate()
 {
-    if ( !IsEnabled() )
-        return false;
-
     wxMenu* const menu = GetMenu();
     if ( !menu || !IsMenuEventAllowed(menu) )
+        return false;
+
+    // Menus are updated when they are opened, which an accelerator does not
+    // do, so the state this item was last given may be out of date.
+    menu->UpdateUI();
+
+    if ( !IsEnabled() )
         return false;
 
     GSimpleAction* const action = FindItemAction(this);
