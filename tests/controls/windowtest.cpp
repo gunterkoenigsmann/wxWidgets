@@ -349,6 +349,36 @@ TEST_CASE_METHOD(WindowTestCase, "Window::FocusEvent", "[window]")
 #endif
 }
 
+// Hiding a frame must not take the focus from a window in another one.
+TEST_CASE_METHOD(WindowTestCase, "Window::FocusKeptWhenOtherFrameHidden",
+                 "[window][focus]")
+{
+    // Hiding a frame clears its focus widget, which needs the frame to have
+    // been shown and to contain something focusable, as wxLogWindow does.
+    std::unique_ptr<wxFrame> other(new wxFrame(nullptr, wxID_ANY, "Other"));
+    new wxTextCtrl(other.get(), wxID_ANY);
+    other->Show();
+    YieldForAWhile();
+
+    EventCounter setfocus(m_window, wxEVT_SET_FOCUS);
+    EventCounter killfocus(m_window, wxEVT_KILL_FOCUS);
+
+    m_window->SetFocus();
+    if ( !setfocus.WaitEvent(500) )
+    {
+        // Without focus there is nothing this test could see being lost.
+        WARN("Couldn't set focus, skipping test.");
+        return;
+    }
+    CHECK_FOCUS_IS( m_window );
+
+    other->Show(false);
+    YieldForAWhile();
+
+    CHECK( killfocus.GetCount() == 0 );
+    CHECK_FOCUS_IS( m_window );
+}
+
 TEST_CASE_METHOD(WindowTestCase, "Window::Mouse", "[window]")
 {
     wxCursor cursor(wxCURSOR_HAND);
