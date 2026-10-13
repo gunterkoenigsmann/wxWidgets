@@ -140,6 +140,58 @@ bool wxGTKLookupThemeColour(GtkWidget* widget, const char* name, wxColour& color
 //
 // Either pointer may be null if only the other is wanted.
 void wxGTKGetStyleMetrics(GtkWidget* widget, GtkBorder* padding, GtkBorder* border);
+
+// Calls draw() to paint a whole width by height widget into cr and keeps only
+// the ring that border leaves around its edge: the frame of a widget that GTK4
+// can only snapshot as a whole.
+//
+// The ring is deliberately not one clip. As a clip it would be four boxes, and
+// cairo (1.18.0 to 1.18.4 at least) writes to read-only memory and crashes
+// when a recording made under such a clip is replayed onto an area lying
+// between the boxes. GSK does exactly that whenever it redraws only a part of
+// a window inside the ring, e.g. a focused text control. So the drawing is
+// recorded once into a group, then painted through each side in turn, every
+// one a single rectangle.
+template <typename DrawFunc>
+inline void wxGTKDrawBorderRing(cairo_t* cr, int width, int height,
+                                const GtkBorder& border, DrawFunc draw)
+{
+    const int iw = width - border.left - border.right;
+    const int ih = height - border.top - border.bottom;
+    if ( iw <= 0 || ih <= 0 )
+    {
+        // Nothing but border: the whole drawing is the ring.
+        draw();
+        return;
+    }
+
+    cairo_push_group(cr);
+    draw();
+    cairo_pattern_t* const whole = cairo_pop_group(cr);
+
+    const int sides[4][4] =
+    {
+        { 0, 0, width, border.top },
+        { 0, border.top + ih, width, border.bottom },
+        { 0, border.top, border.left, ih },
+        { border.left + iw, border.top, border.right, ih },
+    };
+
+    for ( const auto& side : sides )
+    {
+        if ( side[2] <= 0 || side[3] <= 0 )
+            continue;
+
+        cairo_save(cr);
+        cairo_rectangle(cr, side[0], side[1], side[2], side[3]);
+        cairo_clip(cr);
+        cairo_set_source(cr, whole);
+        cairo_paint(cr);
+        cairo_restore(cr);
+    }
+
+    cairo_pattern_destroy(whole);
+}
 #endif
 
 #endif // __WXGTK3__
