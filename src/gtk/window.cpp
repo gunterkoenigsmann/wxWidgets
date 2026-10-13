@@ -3236,6 +3236,15 @@ static void wxGTKResolveFocus(GtkWindow* toplevel)
     if ( owner == gs_currentFocus )
         return;
 
+    // Each toplevel only speaks for the focus inside it. Hiding a window
+    // clears its focus widget (see wxTopLevelWindowGTK::Show()), and that
+    // notification must not take the focus away from a window in another
+    // toplevel, which never lost it.
+    if ( !owner && gs_currentFocus && gs_currentFocus->m_widget &&
+            gtk_widget_get_root(gs_currentFocus->m_widget) !=
+                GTK_ROOT(toplevel) )
+        return;
+
     if ( gs_currentFocus )
         gs_currentFocus->GTKHandleFocusOut();
 
