@@ -103,25 +103,16 @@ static void draw(GtkDrawingArea*, cairo_t* cr, int, int, gpointer data)
     // gtk_render_frame() on a context carrying the button style class; GTK+ 2
     // drew a raised shadow, to the same end. GTK4 cannot draw one part of a
     // widget's style, only snapshot the whole widget, so this draws wx's push
-    // button and clips to the ring the button's border occupies. What is left
+    // button and keeps only the ring the button's border occupies. What is left
     // is the frame, which is what the other two toolkits draw.
     GtkBorder border;
     wxGTKGetStyleMetrics(wxGTKPrivate::GetButtonWidget(), nullptr, &border);
 
-    const int iw = win->m_width - border.left - border.right;
-    const int ih = win->m_height - border.top - border.bottom;
-
-    cairo_save(cr);
-    if ( iw > 0 && ih > 0 )
+    wxGTKDrawBorderRing(cr, win->m_width, win->m_height, border, [&]()
     {
-        cairo_rectangle(cr, 0, 0, win->m_width, win->m_height);
-        cairo_rectangle(cr, border.left, border.top, iw, ih);
-        cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-        cairo_clip(cr);
-    }
-    wxRendererNative::Get().DrawPushButton(
-        win, dc, wxRect(0, 0, win->m_width, win->m_height));
-    cairo_restore(cr);
+        wxRendererNative::Get().DrawPushButton(
+            win, dc, wxRect(0, 0, win->m_width, win->m_height));
+    });
 
     wxDrawMiniFrameDecorations(dc, win);
 }

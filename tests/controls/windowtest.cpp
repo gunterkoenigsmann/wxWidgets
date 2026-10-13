@@ -561,6 +561,70 @@ TEST_CASE_METHOD(WindowTestCase, "Window::MoveVisibleCaret",
     wxYield();
     CHECK( getOverlayPosition() == hiddenMovePosition );
 }
+
+// GSK keeps what a window paints as a cairo recording and, when only a part of
+// the window has changed, replays it onto just that part. Replaying a border
+// recorded under a ring-shaped clip onto a part of the interior crashed inside
+// cairo, which is what clicking into a text control in a file dialog did.
+TEST_CASE("Window::BorderReplaysOntoInterior", "[window][paint]")
+{
+    const int w = 200;
+    const int h = 100;
+    std::unique_ptr<wxWindow> const win(
+        new wxWindow(wxTheApp->GetTopWindow(), wxID_ANY,
+                     wxDefaultPosition, wxSize(w, h), wxBORDER_SUNKEN));
+    win->Show();
+    wxYield();
+
+    const cairo_rectangle_t extents = { 0, 0, double(w), double(h) };
+    cairo_surface_t* const recording =
+        cairo_recording_surface_create(CAIRO_CONTENT_COLOR_ALPHA, &extents);
+    cairo_t* cr = cairo_create(recording);
+    win->GTKDrawBorder(cr);
+    cairo_destroy(cr);
+
+    // Replays the recording onto an image of the given part of the window and
+    // returns how many of its pixels were painted.
+    const auto replay = [recording](int x, int y, int rw, int rh)
+    {
+        cairo_surface_t* const image =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, rw, rh);
+        cairo_t* const crImage = cairo_create(image);
+        cairo_set_source_surface(crImage, recording, -x, -y);
+        cairo_paint(crImage);
+        cairo_destroy(crImage);
+        cairo_surface_flush(image);
+
+        const unsigned char* const data = cairo_image_surface_get_data(image);
+        const int stride = cairo_image_surface_get_stride(image);
+        int painted = 0;
+        for ( int row = 0; row < rh; ++row )
+        {
+            const wxUint32* const pixels =
+                reinterpret_cast<const wxUint32*>(data + row * stride);
+            for ( int col = 0; col < rw; ++col )
+            {
+                if ( pixels[col] >> 24 )
+                    ++painted;
+            }
+        }
+
+        cairo_surface_destroy(image);
+        return painted;
+    };
+
+    // The control: the border was really drawn, and only around the edge, so
+    // that the part of the interior replayed below has nothing in it.
+    const int ring = replay(0, 0, w, h);
+    INFO("Painted pixels in the whole window: " << ring);
+    CHECK( ring > 0 );
+    CHECK( ring < w * h / 4 );
+
+    // This is what used to crash.
+    CHECK( replay(w / 2 - 10, h / 2 - 10, 20, 20) == 0 );
+
+    cairo_surface_destroy(recording);
+}
 #endif // __WXGTK4__
 
 #if wxUSE_HELP
