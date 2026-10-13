@@ -352,6 +352,42 @@ TEST_CASE_METHOD(WindowTestCase, "Window::FocusEvent", "[window]")
 #endif
 }
 
+// Hiding a frame must not take the focus from a window in another one.
+//
+// This is GTK-only: under macOS the focus follows the key window, so showing
+// the other frame takes it there and SetFocus() in the main frame, which is
+// not key, leaves FindFocus() pointing into the other one.
+#ifdef __WXGTK__
+TEST_CASE_METHOD(WindowTestCase, "Window::FocusKeptWhenOtherFrameHidden",
+                 "[window][focus]")
+{
+    // Hiding a frame clears its focus widget, which needs the frame to have
+    // been shown and to contain something focusable, as wxLogWindow does.
+    std::unique_ptr<wxFrame> other(new wxFrame(nullptr, wxID_ANY, "Other"));
+    new wxTextCtrl(other.get(), wxID_ANY);
+    other->Show();
+    YieldForAWhile();
+
+    EventCounter setfocus(m_window, wxEVT_SET_FOCUS);
+    EventCounter killfocus(m_window, wxEVT_KILL_FOCUS);
+
+    m_window->SetFocus();
+    if ( !setfocus.WaitEvent(500) )
+    {
+        // Without focus there is nothing this test could see being lost.
+        WARN("Couldn't set focus, skipping test.");
+        return;
+    }
+    CHECK_FOCUS_IS( m_window );
+
+    other->Show(false);
+    YieldForAWhile();
+
+    CHECK( killfocus.GetCount() == 0 );
+    CHECK_FOCUS_IS( m_window );
+}
+#endif // __WXGTK__
+
 TEST_CASE_METHOD(WindowTestCase, "Window::Mouse", "[window]")
 {
     wxCursor cursor(wxCURSOR_HAND);
@@ -1048,6 +1084,15 @@ TEST_CASE_METHOD(WindowTestCase, "Window::RefreshRectUpdateRegion", "[window]")
     // Settle any repaint still owed from the resize above.
     YieldForAWhile();
 
+#ifdef __WXGTK4__
+    // Under GTK4 the first partial refresh of a window is still a full
+    // repaint: it is what makes wx start keeping the frame that later ones
+    // repaint only part of. See wxPizza::invalidate().
+    painted = false;
+    win->RefreshRect(wxRect(200, 100, 10, 10));
+    REQUIRE( WaitFor("first partial repaint", [&]() { return painted; }, 500) );
+#endif // __WXGTK4__
+
     const wxRect refreshed(20, 30, 100, 40);
 
     painted = false;
@@ -1064,12 +1109,79 @@ TEST_CASE_METHOD(WindowTestCase, "Window::RefreshRectUpdateRegion", "[window]")
          << updated.width << "x" << updated.height);
     CHECK( updated.Contains(refreshed) );
 
-    // Measured while adding this: GTK+ 3 reports exactly the refreshed
-    // rectangle here, GTK4 reports the whole window. Both satisfy the check
-    // above -- repainting more than asked is correct, only wasteful -- so this
-    // is deliberately not asserted, but it is why the check is a Contains()
-    // and not an equality.
+#ifdef __WXGTK4__
+    // Repainting more than asked is correct, only wasteful, which is why the
+    // check above is a Contains(). But GTK4 has no damage region of its own
+    // to coarsen this, so anything more than the rectangle means wx went back
+    // to repainting the whole window -- the full-window repaint per blink of
+    // wxMaxima's cursor that this was measured on.
+    CHECK( updated == refreshed );
+#endif // __WXGTK4__
 }
+
+#if defined(__WXGTK4__)
+
+// The other half of the bargain: a partial repaint must leave everything
+// outside the update region as it was. Under GTK4 that is wx's job, since the
+// frame being repainted is one wx kept, and a frame that was not kept, or not
+// kept up to date, shows here as the old colour disappearing.
+TEST_CASE_METHOD(WindowTestCase, "Window::PartialRepaintKeepsTheRest",
+                 "[window]")
+{
+    if ( !wxTestCanReadScreen() )
+        return;
+
+    wxWindow* const win = m_window;
+    win->SetBackgroundStyle(wxBG_STYLE_PAINT);
+    win->SetSize(200, 100);
+
+    // The paint handler fills the whole window with one colour; only the
+    // update region decides how much of it reaches the screen.
+    wxColour fill = *wxRED;
+    bool painted = false;
+    win->Bind(wxEVT_PAINT, [&](wxPaintEvent&)
+    {
+        wxPaintDC dc(win);
+        dc.SetBrush(wxBrush(fill));
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.DrawRectangle(win->GetClientSize());
+        painted = true;
+    });
+
+    const auto colourAt = [win](int x, int y)
+    {
+        // Give the display server the frame the paint event produced.
+        YieldForAWhile(200);
+        const wxImage img = wxTestCaptureWindow(win).ConvertToImage();
+        return wxColour(img.GetRed(x, y), img.GetGreen(x, y),
+                        img.GetBlue(x, y));
+    };
+
+    // The control: whatever is read back later is only evidence if reading
+    // back finds what was painted at all.
+    REQUIRE( wxTestWaitForPaint(win) );
+    REQUIRE( colourAt(150, 50) == *wxRED );
+
+    // Starts the frame being kept, see Window::RefreshRectUpdateRegion.
+    painted = false;
+    win->RefreshRect(wxRect(0, 0, 10, 10));
+    REQUIRE( WaitFor("first partial repaint", [&]() { return painted; }, 500) );
+
+    fill = *wxBLUE;
+    painted = false;
+    win->RefreshRect(wxRect(0, 0, 100, 100));
+    REQUIRE( WaitFor("partial repaint", [&]() { return painted; }, 500) );
+
+    CHECK( colourAt(50, 50) == *wxBLUE );
+    CHECK( colourAt(150, 50) == *wxRED );
+
+    // And a full refresh still repaints everything.
+    fill = *wxGREEN;
+    REQUIRE( wxTestWaitForPaint(win) );
+    CHECK( colourAt(150, 50) == *wxGREEN );
+}
+
+#endif // __WXGTK4__
 
 #ifdef __WXGTK4__
 

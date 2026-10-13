@@ -117,7 +117,14 @@ case $(uname -s) in
                             # Both need noble; the GTK4 jobs run there
                             # anyway, since the port requires GTK 4.10 and
                             # jammy ships 4.6.
-                            extra_deps='libwebkitgtk-6.0-dev libspelling-1-dev'
+                            #
+                            # XTest too: libgtk-3-dev brings it in through
+                            # the AT-SPI bridge's headers and libgtk-4-dev
+                            # does not. Without it configure disables
+                            # wxUIActionSimulator, with only a warning, and
+                            # every test that synthesises input is compiled
+                            # out of test_gui.
+                            extra_deps='libwebkitgtk-6.0-dev libspelling-1-dev libxtst-dev'
                             ;;
                         3)  libtoolkit_dev=libgtk-3-dev
                             extra_deps='libwebkit2gtk-4.0-dev libgspell-1-dev libayatana-appindicator3-dev'

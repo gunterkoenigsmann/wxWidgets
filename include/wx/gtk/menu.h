@@ -56,6 +56,12 @@ private:
 
     void Init(size_t n, wxMenu *menus[], const wxString titles[], long style);
 
+#ifdef __WXGTK4__
+    // Send wxEVT_MENU_OPEN and wxEVT_MENU_CLOSE from the popovers the menu bar
+    // created for the current model.
+    void GTKConnectMenuPopovers();
+#endif // __WXGTK4__
+
     // wxMenuBar is not a top level window but it still doesn't need a parent
     // window
     virtual bool GTKNeedsParent() const override { return false; }

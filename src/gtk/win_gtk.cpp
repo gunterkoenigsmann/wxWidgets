@@ -1171,11 +1171,12 @@ g_cclosure_user_marshal_VOID__OBJECT_OBJECT (GClosure     *closure,
 #ifdef __WXGTK4__
 // GTK4 replaced the "draw" signal with a snapshot vfunc building render nodes.
 // wx paints with cairo throughout, so rather than rewrite every wxDC operation
-// onto render nodes, take the cairo escape hatch: gtk_snapshot_append_cairo()
-// hands back a real cairo_t, and measurement confirms it is in widget-relative
-// coordinates, exactly as the GTK3 draw vfunc was for a windowless widget --
-// so everything downstream of GTKSendPaintEvents() is unaffected. See
-// docs/gtk/gtk4-phase4-paint-model-design.md.
+// onto render nodes, take the cairo escape hatch: a cairo node hands back a
+// real cairo_t in widget-relative coordinates, exactly as the GTK3 draw vfunc
+// was for a windowless widget -- so everything downstream of
+// GTKSendPaintEvents() is unaffected. wxPizza::snapshot_content() makes the
+// node itself rather than through gtk_snapshot_append_cairo(), so that it can
+// keep it. See docs/gtk/gtk4-phase4-paint-model-design.md.
 //
 // A vfunc carries no user data where the signal carried the wxWindow, so the
 // owner is looked up from the widget; wxWindowGTK sets it when it would
@@ -1195,15 +1196,7 @@ static void pizza_snapshot(GtkWidget* widget, GtkSnapshot* snapshot)
 
     if ( win && w > 0 && h > 0 )
     {
-        graphene_rect_t bounds;
-        bounds.origin.x = 0;
-        bounds.origin.y = 0;
-        bounds.size.width = float(w);
-        bounds.size.height = float(h);
-
-        cairo_t* const cr = gtk_snapshot_append_cairo(snapshot, &bounds);
-        win->GTKSendPaintEvents(cr);
-        cairo_destroy(cr);
+        WX_PIZZA(widget)->snapshot_content(win, snapshot, w, h);
     }
 
     // Children are no longer drawn by chaining up to a parent draw handler:
@@ -1231,6 +1224,222 @@ static void pizza_snapshot(GtkWidget* widget, GtkSnapshot* snapshot)
 #endif // __WXGTK4__
 
 #ifdef __WXGTK4__
+// Partial repainting.
+//
+// GTK4 has no partial invalidation: gtk_widget_queue_draw() redraws the whole
+// widget, and the snapshot vfunc is not told what changed. Painting every
+// frame from scratch is correct, but an application that refreshes a small
+// rectangle -- a blinking cursor, one cell of a grid -- then repaints its
+// whole window each time, which is what it relies on GetUpdateRegion() to
+// avoid.
+//
+// So the pizza keeps the frame it last painted and repaints only what wx
+// invalidated since, clipped to that, the way GTK+ 3 clipped to the damage of
+// its GdkWindow. GTKSendPaintEvents() reads the update region back from the
+// clip, so nothing downstream needs to know.
+//
+// The retained frame costs a full-size image per window, so it is only kept
+// once a window has had a partial invalidation: most windows only ever have
+// Refresh() called on them, for which retaining buys nothing. The first
+// partial invalidation is therefore still a full repaint, which creates it.
+//
+// GTK also re-runs the snapshot of every ancestor of a widget that is
+// redrawn, as each ancestor's render node contains the widget's. A window
+// with nothing invalidated of its own -- the frame around a blinking cursor --
+// hands GTK back the node it produced last time rather than painting again;
+// see snapshot_content().
+//
+// Both rely on knowing about everything that changes what wx would paint.
+// Invalidations from wx are recorded here. Anything else -- a new size or
+// scale, a style, state or direction change, being unmapped -- is a size
+// mismatch, caught by the vfuncs below, or drops what was kept, and all of
+// those repaint everything.
+
+void wxPizza::invalidate(const GdkRectangle* rect)
+{
+    GtkWidget* const widget = GTK_WIDGET(this);
+
+    if ( rect && !m_damageAll )
+    {
+        if ( rect->width <= 0 || rect->height <= 0 )
+            return;
+
+        const bool coversAll =
+            rect->x <= 0 && rect->y <= 0 &&
+            rect->x + rect->width >= gtk_widget_get_width(widget) &&
+            rect->y + rect->height >= gtk_widget_get_height(widget);
+
+        if ( !coversAll )
+        {
+            m_retain = true;
+            if ( !m_damage )
+                m_damage = cairo_region_create();
+            cairo_region_union_rectangle(m_damage, rect);
+        }
+        else
+        {
+            m_damageAll = true;
+        }
+    }
+    else
+    {
+        m_damageAll = true;
+    }
+
+    gtk_widget_queue_draw(widget);
+}
+
+void wxPizza::snapshot_content(wxWindow* win, GtkSnapshot* snapshot,
+                               int width, int height)
+{
+    const int scale = gtk_widget_get_scale_factor(GTK_WIDGET(this));
+
+    if ( m_node && !m_damage && !m_damageAll && m_nodeScale == scale )
+    {
+        graphene_rect_t old;
+        gsk_render_node_get_bounds(m_node, &old);
+        if ( int(old.size.width) == width && int(old.size.height) == height )
+        {
+            gtk_snapshot_append_node(snapshot, m_node);
+            return;
+        }
+    }
+
+    graphene_rect_t bounds;
+    graphene_rect_init(&bounds, 0, 0, float(width), float(height));
+
+    GskRenderNode* const node = gsk_cairo_node_new(&bounds);
+    cairo_t* const cr = gsk_cairo_node_get_draw_context(node);
+    paint(win, cr, width, height);
+    cairo_destroy(cr);
+
+    gtk_snapshot_append_node(snapshot, node);
+
+    if ( m_node )
+        gsk_render_node_unref(m_node);
+    m_node = node;
+    m_nodeScale = scale;
+}
+
+void wxPizza::drop_retained()
+{
+    if ( m_node )
+    {
+        gsk_render_node_unref(m_node);
+        m_node = nullptr;
+    }
+
+    if ( m_retained )
+    {
+        cairo_surface_destroy(m_retained);
+        m_retained = nullptr;
+    }
+
+    if ( m_damage )
+    {
+        cairo_region_destroy(m_damage);
+        m_damage = nullptr;
+    }
+
+    m_damageAll = false;
+}
+
+void wxPizza::paint(wxWindow* win, cairo_t* cr, int width, int height)
+{
+    if ( !m_retain )
+    {
+        win->GTKSendPaintEvents(cr);
+        m_damageAll = false;
+        return;
+    }
+
+    GtkWidget* const widget = GTK_WIDGET(this);
+    const int scale = gtk_widget_get_scale_factor(widget);
+
+    const bool sizeMatches =
+        m_retained &&
+        cairo_image_surface_get_width(m_retained) == width * scale &&
+        cairo_image_surface_get_height(m_retained) == height * scale;
+
+    if ( !sizeMatches )
+    {
+        if ( m_retained )
+            cairo_surface_destroy(m_retained);
+        m_retained = cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                                width * scale, height * scale);
+        cairo_surface_set_device_scale(m_retained, scale, scale);
+    }
+
+    // No damage at all means GTK redraws the widget for a reason of its own,
+    // which the retained frame cannot know about.
+    const bool partial = sizeMatches && m_damage && !m_damageAll;
+
+    cairo_t* const frame = cairo_create(m_retained);
+    if ( partial )
+    {
+        gdk_cairo_region(frame, m_damage);
+        cairo_clip(frame);
+    }
+
+    // What is being repainted starts out transparent, as the context GTK
+    // hands to a snapshot does: the widget's CSS background is drawn below
+    // it, and a window that paints nothing must let it show through.
+    cairo_save(frame);
+    cairo_set_operator(frame, CAIRO_OPERATOR_CLEAR);
+    cairo_paint(frame);
+    cairo_restore(frame);
+
+    win->GTKSendPaintEvents(frame);
+    cairo_destroy(frame);
+
+    cairo_set_source_surface(cr, m_retained, 0, 0);
+    cairo_paint(cr);
+
+    if ( m_damage )
+    {
+        cairo_region_destroy(m_damage);
+        m_damage = nullptr;
+    }
+    m_damageAll = false;
+}
+
+// GTK redraws the widget for these, and what wx painted may depend on them, so
+// the retained frame must not be reused for the next one.
+static void pizza_css_changed(GtkWidget* widget, GtkCssStyleChange* change)
+{
+    parent_class->css_changed(widget, change);
+    WX_PIZZA(widget)->invalidate_all();
+}
+
+static void pizza_state_flags_changed(GtkWidget* widget, GtkStateFlags previous)
+{
+    parent_class->state_flags_changed(widget, previous);
+    WX_PIZZA(widget)->invalidate_all();
+}
+
+static void pizza_direction_changed(GtkWidget* widget,
+                                    GtkTextDirection previous)
+{
+    parent_class->direction_changed(widget, previous);
+    WX_PIZZA(widget)->invalidate_all();
+}
+
+static void pizza_system_setting_changed(GtkWidget* widget,
+                                         GtkSystemSetting setting)
+{
+    parent_class->system_setting_changed(widget, setting);
+    WX_PIZZA(widget)->invalidate_all();
+}
+
+// Nothing is drawn while unmapped, and wx does not invalidate a window it is
+// not showing, so what the retained frame shows may be stale by the time it is
+// mapped again. The memory is better released than kept for that.
+static void pizza_unmap(GtkWidget* widget)
+{
+    WX_PIZZA(widget)->drop_retained();
+    parent_class->unmap(widget);
+}
+
 // Under GTK3 the m_children entries were freed by pizza_remove() as
 // GtkContainer tore the children down. With no such vfunc under GTK4 the list
 // has to be released here, or it leaks one wxPizzaChild per child every time a
@@ -1249,6 +1458,8 @@ static void pizza_dispose(GObject* object)
 
     g_list_free(pizza->m_children);
     pizza->m_children = nullptr;
+
+    pizza->drop_retained();
 
     G_OBJECT_CLASS(parent_class)->dispose(object);
 }
@@ -1275,6 +1486,11 @@ static void class_init(void* g_class, void*)
 #ifdef __WXGTK4__
     widget_class->measure = pizza_measure;
     widget_class->snapshot = pizza_snapshot;
+    widget_class->css_changed = pizza_css_changed;
+    widget_class->state_flags_changed = pizza_state_flags_changed;
+    widget_class->direction_changed = pizza_direction_changed;
+    widget_class->system_setting_changed = pizza_system_setting_changed;
+    widget_class->unmap = pizza_unmap;
 
     // Use the exported constant rather than repeating the name: window.cpp and
     // toplevel.cpp connect through it, and a silent divergence would cost every
@@ -1646,7 +1862,8 @@ void wxPizza::scroll(int dx, int dy)
     // behavior, since size_allocate_child() above already positions
     // every child from m_scroll_x/m_scroll_y on every allocation pass.
     gtk_widget_queue_allocate(widget);
-    gtk_widget_queue_draw(widget);
+    // Everything moved, so none of the retained frame is where it was.
+    invalidate_all();
 #else
     GdkWindow* window = gtk_widget_get_window(widget);
     if (window)

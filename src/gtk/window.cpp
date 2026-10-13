@@ -2747,6 +2747,29 @@ static void SendSetCursorEvent(wxWindowGTK* win, int x, int y)
     }
     if (win->m_needCursorReset)
         win->GTKUpdateCursor();
+
+#ifdef __WXGTK4__
+    // A cursor which a wxEVT_SET_CURSOR handler chose for a parent is set on
+    // the parent's widget, and GTK4 shows it over every descendant that does
+    // not set a cursor of its own -- there are no child GdkWindows any more
+    // to hide it. Nor does the parent get a leave event when the pointer
+    // moves into a child, which is where GTK3 reset it: the parent's motion
+    // controller still contains the pointer. So the resize cursor wxAUI sets
+    // over a sash would stay over the pane next to it for as long as the
+    // pointer remained inside it.
+    //
+    // Nobody wants a special cursor at this position, or win would have got
+    // it above, so none of the ancestors' ones applies here either.
+    for ( wxWindowGTK* p = win; !p->IsTopLevel(); )
+    {
+        p = p->GetParent();
+        if ( !p )
+            break;
+
+        if ( p->m_needCursorReset )
+            p->GTKUpdateCursor();
+    }
+#endif // __WXGTK4__
 }
 
 //-----------------------------------------------------------------------------
@@ -3211,6 +3234,15 @@ static void wxGTKResolveFocus(GtkWindow* toplevel)
         wxGTKFocusOwner(gtk_window_get_focus(toplevel));
 
     if ( owner == gs_currentFocus )
+        return;
+
+    // Each toplevel only speaks for the focus inside it. Hiding a window
+    // clears its focus widget (see wxTopLevelWindowGTK::Show()), and that
+    // notification must not take the focus away from a window in another
+    // toplevel, which never lost it.
+    if ( !owner && gs_currentFocus && gs_currentFocus->m_widget &&
+            gtk_widget_get_root(gs_currentFocus->m_widget) !=
+                GTK_ROOT(toplevel) )
         return;
 
     if ( gs_currentFocus )
@@ -8472,9 +8504,9 @@ static void wxGTKRefreshChildren(wxWindowGTK* win, const wxRect* rect)
         if ( rect && !child->GetRect().Intersects(*rect) )
             continue;
 
-        // No rectangle: a widget is always redrawn whole under GTK4, and this
-        // recurses into the child's own children in turn, as invalidating a
-        // GdkWindow tree used to.
+        // The whole child, which is more than the rectangle asked for but
+        // never less. This recurses into the child's own children in turn, as
+        // invalidating a GdkWindow tree used to.
         child->Refresh();
     }
 }
@@ -8490,20 +8522,21 @@ void wxWindowGTK::Refresh(bool WXUNUSED(eraseBackground),
         {
 #ifdef __WXGTK4__
             // GTK4 has neither a GdkWindow to invalidate nor any partial
-            // invalidation: gtk_widget_queue_draw_area() is gone too, and a
-            // widget is always redrawn whole. The rectangle therefore does not
-            // narrow what is repainted -- it cannot, since the snapshot vfunc
-            // has to rebuild the widget's entire scene and anything wx left
-            // out would simply be missing -- but it still decides which
-            // children are in it, see below.
-            //
-            // This does cost something. Measured on a 300x200 window,
-            // RefreshRect(20,30 100x40) leaves GetUpdateRegion() reporting
-            // 20,30 100x40 under GTK+ 3 and the whole 0,0 300x200 under GTK4,
-            // on both X11 and Wayland. An application repainting incrementally
-            // therefore does full-window work per invalidation here. See
-            // docs/gtk/gtk4-phase4-paint-model-design.md section 3.
-            gtk_widget_queue_draw(m_wxwindow);
+            // invalidation, so the pizza tracks what was invalidated itself
+            // and repaints just that; see wxPizza::invalidate().
+            wxPizza* const pizza = WX_PIZZA(m_wxwindow);
+            if (rect)
+            {
+                GdkRectangle r =
+                    { rect->x, rect->y, rect->width, rect->height };
+                if (GetLayoutDirection() == wxLayout_RightToLeft)
+                    r.x = gtk_widget_get_width(m_wxwindow) - r.x - r.width;
+                pizza->invalidate(&r);
+            }
+            else
+            {
+                pizza->invalidate_all();
+            }
             wxGTKRefreshChildren(this, rect);
 #else
             GdkWindow* window = gtk_widget_get_window(m_wxwindow);
@@ -8709,13 +8742,9 @@ void wxWindowGTK::GTKSendPaintEvents(const GdkRegion* region)
     // the cairo_t from gtk_snapshot_append_cairo() is already clipped to the
     // widget's bounds.
     //
-    // Nor is there a damage region to narrow it to. GTK4 removed partial
-    // invalidation entirely (gtk_widget_queue_draw_area() is gone) and tells a
-    // widget nothing about what changed -- the renderer culls by diffing
-    // render nodes instead. So m_updateRegion below ends up being the whole
-    // client area every time, and wxWindow::GetUpdateRegion() reports that.
-    // Repainting more than necessary is always safe, but applications using
-    // the update region as an optimisation lose it. See
+    // GTK4 tells a widget nothing about what changed, but wxPizza::paint()
+    // clips the context to what wx invalidated before calling this, so the
+    // clip extents below are the update region just as under GTK+ 3. See
     // docs/gtk/gtk4-phase4-paint-model-design.md section 3.
     if (GetLayoutDirection() == wxLayout_RightToLeft)
     {
@@ -10527,7 +10556,13 @@ void wxWindowGTK::GTKFreezeWidget(GtkWidget* widget)
 void wxWindowGTK::GTKThawWidget(GtkWidget* widget)
 {
     g_object_set_data(G_OBJECT(widget), "wx-frozen", nullptr);
-    gtk_widget_queue_draw(widget);
+
+    // Whatever changed while frozen was not necessarily invalidated, so the
+    // pizza's retained frame cannot be trusted for any of it.
+    if (WX_IS_PIZZA(widget))
+        WX_PIZZA(widget)->invalidate_all();
+    else
+        gtk_widget_queue_draw(widget);
 }
 
 #else // !__WXGTK4__

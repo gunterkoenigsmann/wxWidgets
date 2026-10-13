@@ -62,6 +62,15 @@ before pushing.
   set. Without it several cases assert things a window manager under
   Xvfb will not give -- `wxTopLevel::Show` checks `IsActive()` -- and
   fail for the harness rather than the code.
+* Run `test_gui` from a directory holding the test data: the source
+  `tests/` for an in-tree build, or an out-of-tree `tests/` after a
+  plain `make` there (`make test_gui` alone copies none of it). Run
+  from anywhere else, 32 image, XRC and translation cases fail for the
+  harness. 32 of the 33 failures reported in #262 were this.
+* No `libxtst-dev`, no input tests: configure then disables
+  wxUIActionSimulator with only a warning, and `test_gui` quietly runs
+  54 fewer cases. CI's GTK4 job ran like that until #264;
+  `build/tools/before_install.sh` installs it now.
 * `make -C tests test_gui` does not depend on the library, so it can
   report "up to date" and leave a binary older than the change under
   test. `rm -f tests/test_gui` first, every time.

@@ -121,13 +121,52 @@ incremental drawing uses: a canvas invalidating one cell per mouse motion —
 what `demos/life` does — did a one-cell repaint under GTK+ 3 and does a
 full-window repaint under GTK4.
 
-The decision stands: wx cannot report less than it redraws, and under GTK4 it
-must redraw everything. But the cost is real for paint-heavy applications and
-belongs in the port's user-facing notes as such, not as "costs nothing in
-practice".
+wx cannot report less than it redraws, and GTK4 rebuilds a widget's whole
+scene on every snapshot. What wx *can* do is decide what goes into that scene,
+and that is how the precision comes back.
 
-Efficiency is not lost overall either: GTK4's renderer culls by diffing render
-nodes, so the work still gets skipped, just below wx rather than inside it.
+### 3.1 Retaining the last frame
+
+`wxPizza` keeps the frame it last painted in an image surface and records what
+wx invalidated since (`wxPizza::invalidate()`). Its snapshot
+(`wxPizza::paint()`) clips a context on the retained frame to that damage,
+clears it, runs `GTKSendPaintEvents()` on it -- which reads the update region
+back from the clip, exactly as it did from GTK+ 3's damage clip -- and hands
+the whole frame to GTK. After that, `RefreshRect(20,30 100x40)` reports
+`20,30 100x40` under GTK4 too, which `Window::RefreshRectUpdateRegion` now
+asserts, and `Window::PartialRepaintKeepsTheRest` checks on screen that what
+lies outside it survives.
+
+The retained frame is reused only when wx invalidations are all that happened
+since it was painted. Everything else repaints it whole:
+
+- a new size or scale factor, seen as a frame of the wrong size;
+- GTK redrawing the widget on its own account, seen as no damage at all;
+- style, state, direction and system-setting changes, caught by `wxPizza`'s
+  vfuncs for them;
+- scrolling, thawing and unmapping, which move or invalidate everything.
+
+GTK also re-runs the snapshot of every ancestor of a widget it redraws, since
+their render nodes contain the widget's. An ancestor with nothing invalidated
+of its own therefore hands GTK back the node it made last time
+(`wxPizza::snapshot_content()`) instead of painting again; without that, a
+blinking cursor in wxMaxima repainted the AUI frame around it every time.
+
+A frame costs a full-size image, so it is kept only once a window has had a
+partial invalidation; windows that are only ever `Refresh()`ed whole keep
+painting straight into GTK's context as before. The first partial
+invalidation is therefore still a full repaint.
+
+Measured on wxMaxima, whose cursor blink is a `RefreshRect()` three pixels
+high: each blink repainted the whole worksheet, and the main thread used 9.5%
+of a core while the program sat idle, against 1.6% under GTK+ 3 on the same
+machine. With the retained frame the blink reports `0,82 731x3`, as GTK+ 3
+does, and together with reusing the ancestors' nodes (and the menus no longer
+being updated on every idle event, which is a separate change) the main thread
+is down to 2.0%.
+
+Efficiency is not lost elsewhere either: GTK4's renderer culls by diffing
+render nodes, so the work below wx still gets skipped.
 
 ## 4. Work items
 

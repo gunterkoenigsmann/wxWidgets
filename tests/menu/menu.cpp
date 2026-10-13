@@ -28,6 +28,10 @@
 
 #include "waitfor.h"
 
+#ifdef __WXGTK4__
+    #include <gtk/gtk.h>
+#endif
+
 #include <stdarg.h>
 
 #include <memory>
@@ -88,12 +92,6 @@ class MenuTestCase
 public:
     MenuTestCase() { CreateFrame(); }
     ~MenuTestCase() { m_frame->Destroy(); }
-
-#ifdef __WXGTK4__
-    // Bound by the Menu::UpdateUIFromIdle case below, which is its own class
-    // deriving from this one, so this cannot be protected.
-    void OnUpdateBar(wxUpdateUIEvent& event);
-#endif // __WXGTK4__
 
 protected:
     void CreateFrame();
@@ -411,21 +409,92 @@ TEST_CASE_METHOD(MenuTestCase, "Menu::Labels", "[menu]")
 
 #ifdef __WXGTK4__
 
-TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIFromIdle", "[menu]")
+namespace
 {
-    m_frame->Bind(wxEVT_UPDATE_UI, &MenuTestCase::OnUpdateBar, this,
-                  MenuTestCase_Bar);
 
-    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
-    CHECK( !m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+// The popover the menu bar opens for its menu at the given position.
+GtkWidget* GetMenuBarPopover(wxMenuBar* bar, size_t pos)
+{
+    GtkWidget* item = gtk_widget_get_first_child(bar->GetHandle());
+    for ( size_t n = 0; item && n < pos; ++n )
+        item = gtk_widget_get_next_sibling(item);
 
-    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
-    CHECK( m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+    for ( GtkWidget* child = item ? gtk_widget_get_first_child(item) : nullptr;
+          child;
+          child = gtk_widget_get_next_sibling(child) )
+    {
+        if ( GTK_IS_POPOVER(child) )
+            return child;
+    }
+
+    return nullptr;
 }
 
-void MenuTestCase::OnUpdateBar(wxUpdateUIEvent& event)
+} // anonymous namespace
+
+// Menus are updated when they are opened, as under GTK+ 3, and not on every
+// idle event: walking every item of every menu each time is what kept an idle
+// wxMaxima, whose menus have hundreds of items, at several percent of a core.
+TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIOnOpen", "[menu]")
 {
-    event.Enable(!m_menuWithBar->IsEnabled(MenuTestCase_Bar));
+    int updates = 0;
+    m_frame->Bind(wxEVT_UPDATE_UI, [&](wxUpdateUIEvent& event)
+    {
+        ++updates;
+        event.Enable(false);
+    }, MenuTestCase_Bar);
+
+    int opened = 0;
+    m_frame->Bind(wxEVT_MENU_OPEN, [&](wxMenuEvent& event)
+    {
+        if ( event.GetMenu() == m_menuWithBar )
+            ++opened;
+        event.Skip();
+    });
+
+    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
+    CHECK( updates == 0 );
+    CHECK( m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+
+    wxMenuBar* const bar = m_frame->GetMenuBar();
+    GtkWidget* const popover =
+        GetMenuBarPopover(bar, bar->FindMenu(m_menuLabels[1]));
+    REQUIRE( popover );
+
+    gtk_widget_set_visible(popover, TRUE);
+    gtk_widget_set_visible(popover, FALSE);
+
+    CHECK( opened == 1 );
+    CHECK( updates > 0 );
+    CHECK( !m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+}
+
+// An accelerator activates an item without its menu being opened, so the item
+// has to be brought up to date first, or it acts on whatever state the menu
+// was last opened with.
+TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIOnAccel", "[menu]")
+{
+    bool enable = false;
+    m_frame->Bind(wxEVT_UPDATE_UI, [&](wxUpdateUIEvent& event)
+    {
+        event.Enable(enable);
+    }, MenuTestCase_Bar);
+
+    int activated = 0;
+    m_frame->Bind(wxEVT_MENU, [&](wxCommandEvent&) { ++activated; },
+                  MenuTestCase_Bar);
+
+    wxMenuItem* const item = m_frame->GetMenuBar()->FindItem(MenuTestCase_Bar);
+    REQUIRE( item );
+
+    CHECK( !item->GTKActivate() );
+    CHECK( activated == 0 );
+
+    // The control: the same activation goes through once the handler allows
+    // it, so the refusal above was the update and not a broken activation.
+    enable = true;
+    CHECK( item->GTKActivate() );
+    CHECK( activated == 1 );
 }
 
 #endif // __WXGTK4__
