@@ -48,4 +48,17 @@ wx_gtk_check_version(guint required_major, guint required_minor, guint required_
 
 #endif // __WXGTK4__
 
+// GTK4 has neither GtkTargetEntry nor gtk_selection_*().
+#if defined(__ELF__) && !defined(__WXGTK4__)
+#define wxHAS_GTK_SELECTION_SET_TARGETS
+
+// (Re)declare this function with weak attribute to allow easily checking
+// for its presence at runtime (i.e. easier than with dlsym()).
+extern "C"
+void gtk_selection_set_targets(GtkWidget *widget,
+                               GdkAtom selection,
+                               const GtkTargetEntry *targets,
+                               guint ntargets) __attribute__((weak));
+#endif
+
 #endif // _WX_GTK_PRIVATE_WRAPGTK_H_

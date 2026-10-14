@@ -30,6 +30,35 @@
 
 #include <memory>
 
+class RefreshCountingRichTextCtrl : public wxRichTextCtrl
+{
+public:
+    RefreshCountingRichTextCtrl(wxWindow *parent)
+        : wxRichTextCtrl(parent, wxID_ANY, "", wxDefaultPosition,
+                         wxSize(400, 200), wxWANTS_CHARS)
+    {
+    }
+
+    void Refresh(bool eraseBackground = true,
+                 const wxRect *rect = nullptr) override
+    {
+        m_refreshCount++;
+        wxRichTextCtrl::Refresh(eraseBackground, rect);
+    }
+
+    int GetRefreshCount() const
+    {
+        return m_refreshCount;
+    }
+
+    void ResetRefreshCount()
+    {
+        m_refreshCount = 0;
+    }
+private:
+    int m_refreshCount = 0;
+};
+
 class RichTextCtrlTestCase
 {
 public:
@@ -432,6 +461,21 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::LineBreak",
     CHECK(m_rich->GetCaretPosition() == 6);
 }
 
+TEST_CASE_METHOD(RichTextCtrlTestCase,
+                 "RichTextCtrl::MoveDownToSingleCharacterLine",
+                 "[richtextctrl]")
+{
+    m_rich->SetValue("This line contains several characters.\nX");
+
+    m_rich->SetInsertionPointEnd();
+    const long endOfSingleCharacterLine = m_rich->GetCaretPosition();
+
+    m_rich->SetInsertionPoint(10);
+    REQUIRE(m_rich->MoveDown());
+
+    CHECK(m_rich->GetCaretPosition() == endOfSingleCharacterLine);
+}
+
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Selection",
                  "[richtextctrl]")
 {
@@ -609,6 +653,28 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Underline",
     m_rich->SetSelection(40, 45);
 
     CHECK(!m_rich->IsSelectionUnderlined());
+}
+
+static void CheckTextEffectToggle(wxRichTextCtrl& rich, int effect)
+{
+    CHECK(!rich.DoesSelectionHaveTextEffectFlag(effect));
+
+    rich.ApplyTextEffectToSelection(effect);
+    CHECK(rich.DoesSelectionHaveTextEffectFlag(effect));
+
+    rich.ApplyTextEffectToSelection(effect);
+    CHECK(!rich.DoesSelectionHaveTextEffectFlag(effect));
+}
+
+TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::TextEffect",
+                 "[richtextctrl]")
+{
+    m_rich->SetValue("text");
+    m_rich->SetInsertionPointEnd();
+
+    CheckTextEffectToggle(*m_rich, wxTEXT_ATTR_EFFECT_STRIKETHROUGH);
+    CheckTextEffectToggle(*m_rich, wxTEXT_ATTR_EFFECT_SUPERSCRIPT);
+    CheckTextEffectToggle(*m_rich, wxTEXT_ATTR_EFFECT_SUBSCRIPT);
 }
 
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Indent",
@@ -813,6 +879,26 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Font", "[richtextctrl]")
     CHECK(fontstyle.GetFont() == font);
 }
 
+TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::TextEffects",
+                 "[richtextctrl]")
+{
+    const int effect = wxTEXT_ATTR_EFFECT_SUPERSCRIPT;
+
+    m_rich->ApplyTextEffectToSelection(effect);
+    CHECK(m_rich->DoesSelectionHaveTextEffectFlag(effect));
+
+    m_rich->WriteText("x");
+
+    m_rich->ApplyTextEffectToSelection(effect);
+    CHECK(!m_rich->DoesSelectionHaveTextEffectFlag(effect));
+
+    m_rich->WriteText("y");
+
+    wxTextAttr style;
+    m_rich->GetStyle(1, style);
+    CHECK((style.GetTextEffects() & effect) == 0);
+}
+
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Delete",
                  "[richtextctrl]")
 {
@@ -836,6 +922,28 @@ TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Delete",
     m_rich->Delete(wxRichTextRange(14, 29));
 
     CHECK(m_rich->GetValue() == "long long line");
+}
+
+TEST_CASE("RichTextCtrl::DeleteParagraphEndRefresh", "[richtextctrl]")
+{
+    auto rich =
+        make_unique<RefreshCountingRichTextCtrl>(wxTheApp->GetTopWindow());
+
+    rich->AddParagraph("first paragraph");
+    const wxRichTextRange range = rich->AddParagraph("second paragraph");
+    rich->AddParagraph("third paragraph");
+
+    rich->ResetRefreshCount();
+
+    rich->SetSelection(range.GetStart(), range.GetEnd() + 1);
+    REQUIRE(rich->HasSelection());
+
+    rich->DeleteSelectedContent();
+
+    CHECK(rich->GetRefreshCount() > 0);
+    CHECK(rich->GetValue().Contains("first paragraph"));
+    CHECK(!rich->GetValue().Contains("second paragraph"));
+    CHECK(rich->GetValue().Contains("third paragraph"));
 }
 
 TEST_CASE_METHOD(RichTextCtrlTestCase, "RichTextCtrl::Url", "[richtextctrl]")
