@@ -8705,24 +8705,19 @@ void wxWindowGTK::GTKDrawBorder(cairo_t* cr)
         // The GTK+ 3 code drew an entry's frame and nothing else, through
         // gtk_render_frame(). GTK4 has no way to draw one part of a widget's
         // style; what it can do is snapshot the whole widget, which
-        // wxRendererNative::DrawTextCtrl() now does. Clipping to the ring the
+        // wxRendererNative::DrawTextCtrl() now does. Keeping only the ring the
         // border occupies keeps the entry's background out of the window's
         // interior, which leaves exactly the frame the GTK+ 3 code drew.
         GtkBorder border;
         wxGTKGetStyleMetrics(wxGTKPrivate::GetEntryWidget(), nullptr, &border);
 
-        const int iw = w - border.left - border.right;
-        const int ih = h - border.top - border.bottom;
-        if ( iw > 0 && ih > 0 )
+        wxGTKDrawBorderRing(cr, w, h, border, [&]()
         {
-            cairo_rectangle(cr, 0, 0, w, h);
-            cairo_rectangle(cr, border.left, border.top, iw, ih);
-            cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
-            cairo_clip(cr);
-        }
-
-        wxGTKCairoDC dc(cr, static_cast<wxWindow*>(this), GetLayoutDirection());
-        wxRendererNative::Get().DrawTextCtrl(this, dc, wxRect(0, 0, w, h));
+            wxGTKCairoDC dc(cr, static_cast<wxWindow*>(this),
+                            GetLayoutDirection());
+            wxRendererNative::Get().DrawTextCtrl(this, dc,
+                                                 wxRect(0, 0, w, h));
+        });
     }
 
     cairo_restore(cr);
