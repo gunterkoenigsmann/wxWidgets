@@ -17,6 +17,7 @@
 #include "wx/gtk/private.h"
 #include "wx/gtk/private/gtk3-compat.h"
 #include "wx/gtk/private/win_gtk.h"
+#include "wx/gtk/private/cairo.h"
 #ifdef __WXGTK3__
     #include "wx/gtk/private/stylecontext.h"
 #endif
@@ -1308,10 +1309,37 @@ void wxPizza::snapshot_content(wxWindow* win, GtkSnapshot* snapshot,
     graphene_rect_t bounds;
     graphene_rect_init(&bounds, 0, 0, float(width), float(height));
 
-    GskRenderNode* const node = gsk_cairo_node_new(&bounds);
+    GskRenderNode* node = gsk_cairo_node_new(&bounds);
     cairo_t* const cr = gsk_cairo_node_get_draw_context(node);
     paint(win, cr, width, height);
     cairo_destroy(cr);
+
+    // See wxGTKMarkMultiRectClip(). Replaying the whole recording is safe, as
+    // every rectangle of a recorded clip lies within it; only a part falling
+    // between them is not, and an image can be drawn in parts.
+    cairo_surface_t* const recording = gsk_cairo_node_get_surface(node);
+    if ( wxGTKHasMultiRectClip(recording) )
+    {
+        cairo_surface_t* const image =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
+                                       width * scale, height * scale);
+        cairo_surface_set_device_scale(image, scale, scale);
+
+        cairo_t* const crImage = cairo_create(image);
+        cairo_set_source_surface(crImage, recording, 0, 0);
+        cairo_paint(crImage);
+        cairo_destroy(crImage);
+
+        GskRenderNode* const flat = gsk_cairo_node_new(&bounds);
+        cairo_t* const crFlat = gsk_cairo_node_get_draw_context(flat);
+        cairo_set_source_surface(crFlat, image, 0, 0);
+        cairo_paint(crFlat);
+        cairo_destroy(crFlat);
+        cairo_surface_destroy(image);
+
+        gsk_render_node_unref(node);
+        node = flat;
+    }
 
     gtk_snapshot_append_node(snapshot, node);
 
@@ -1540,6 +1568,23 @@ static void class_init(void* g_class, void*)
 }
 
 } // extern "C"
+
+#ifdef __WXGTK4__
+static cairo_user_data_key_t gs_multiRectClipKey;
+
+void wxGTKMarkMultiRectClip(cairo_t* cr)
+{
+    // The target, not the group target: a clip set inside a group still ends
+    // up in the recording the group is painted into.
+    cairo_surface_set_user_data(cairo_get_target(cr), &gs_multiRectClipKey,
+                                &gs_multiRectClipKey, nullptr);
+}
+
+bool wxGTKHasMultiRectClip(cairo_surface_t* surface)
+{
+    return cairo_surface_get_user_data(surface, &gs_multiRectClipKey);
+}
+#endif // __WXGTK4__
 
 #ifdef __WXGTK4__
 // "extern" is what makes the visibility attribute apply here: without it a

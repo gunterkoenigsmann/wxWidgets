@@ -566,6 +566,76 @@ TEST_CASE_METHOD(WindowTestCase, "Window::MoveVisibleCaret",
 }
 
 // GSK keeps what a window paints as a cairo recording and, when only a part of
+// the window has changed, replays it onto just that part. A paint handler
+// clipping to a region of several rectangles -- wxGrid does, around merged
+// cells -- made that replay crash inside cairo when the part lay between the
+// rectangles.
+TEST_CASE("Window::RegionClipReplaysBetweenRects", "[window][paint]")
+{
+    const int w = 200;
+    const int h = 100;
+    std::unique_ptr<wxWindow> const win(
+        new wxWindow(wxTheApp->GetTopWindow(), wxID_ANY,
+                     wxDefaultPosition, wxSize(w, h)));
+    win->Bind(wxEVT_PAINT, [&](wxPaintEvent&)
+    {
+        wxPaintDC dc(win.get());
+        wxRegion region(0, 0, 50, h);
+        region.Union(w - 50, 0, 50, h);
+        dc.SetDeviceClippingRegion(region);
+        dc.SetBrush(*wxRED_BRUSH);
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.DrawRectangle(0, 0, w, h);
+    });
+    win->Show();
+    wxYield();
+
+    wxPizza* const pizza = WX_PIZZA(win->GetConnectWidget());
+    GtkSnapshot* const snapshot = gtk_snapshot_new();
+    pizza->snapshot_content(win.get(), snapshot, w, h);
+    GskRenderNode* const node = gtk_snapshot_free_to_node(snapshot);
+    REQUIRE( node );
+
+    // Draws the node onto an image of the given part of the window, as GSK
+    // does, and returns how many of its pixels were painted.
+    const auto replay = [node](int x, int y, int rw, int rh)
+    {
+        cairo_surface_t* const image =
+            cairo_image_surface_create(CAIRO_FORMAT_ARGB32, rw, rh);
+        cairo_t* const cr = cairo_create(image);
+        cairo_translate(cr, -x, -y);
+        gsk_render_node_draw(node, cr);
+        cairo_destroy(cr);
+        cairo_surface_flush(image);
+
+        const unsigned char* const data = cairo_image_surface_get_data(image);
+        const int stride = cairo_image_surface_get_stride(image);
+        int painted = 0;
+        for ( int row = 0; row < rh; ++row )
+        {
+            const wxUint32* const pixels =
+                reinterpret_cast<const wxUint32*>(data + row * stride);
+            for ( int col = 0; col < rw; ++col )
+            {
+                if ( pixels[col] >> 24 )
+                    ++painted;
+            }
+        }
+
+        cairo_surface_destroy(image);
+        return painted;
+    };
+
+    // The control: the handler really painted, and only inside the region.
+    CHECK( replay(0, 0, w, h) == 2 * 50 * h );
+
+    // This is what used to crash.
+    CHECK( replay(w / 2 - 10, h / 2 - 10, 20, 20) == 0 );
+
+    gsk_render_node_unref(node);
+}
+
+// GSK keeps what a window paints as a cairo recording and, when only a part of
 // the window has changed, replays it onto just that part. Replaying a border
 // recorded under a ring-shaped clip onto a part of the interior crashed inside
 // cairo, which is what clicking into a text control in a file dialog did.
