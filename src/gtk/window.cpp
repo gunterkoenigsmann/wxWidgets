@@ -3948,6 +3948,66 @@ bool ButtonEventAlreadyProcessed(GdkEvent* gdk_event)
     return false;
 }
 
+// A wxEVT_LEFT_DOWN handler may run the main loop before it captures the
+// mouse: wxWindow::Update() does under GTK4, and wxAuiToolBar calls it to show
+// its pressed button. The release of the same button can then be dispatched
+// from inside the handler, before the capture exists, and a handler that only
+// gives the capture back if it holds it -- wxAuiToolBar's again -- never does.
+// Every later click then goes to that window, so no sash anywhere can be
+// dragged until something else takes the capture away.
+//
+// So such a release is held back and delivered once the press handler has
+// returned, which is the order it would have arrived in had nothing run the
+// loop. The button state is still updated when it arrives, so a handler that
+// asks wxGetMouseState() sees the button come up.
+int gs_buttonBeingPressed = 0;
+
+struct HeldRelease
+{
+    wxWeakRef<wxWindow> win;
+    GdkEvent* event = nullptr;
+    int button = 0;
+    double x = 0;
+    double y = 0;
+};
+
+HeldRelease gs_heldRelease;
+
+bool HoldReleaseDuringPress(wxWindowGTK* win, GdkEvent* gdk_event,
+                            int button, double x, double y)
+{
+    if ( !gdk_event || button != gs_buttonBeingPressed ||
+            gs_heldRelease.event )
+        return false;
+
+    gs_heldRelease.win = static_cast<wxWindow*>(win);
+    gs_heldRelease.event = gdk_event_ref(gdk_event);
+    gs_heldRelease.button = button;
+    gs_heldRelease.x = x;
+    gs_heldRelease.y = y;
+
+    return true;
+}
+
+void DeliverHeldRelease()
+{
+    if ( !gs_heldRelease.event )
+        return;
+
+    // Taken out before delivering it: its handler may press and release
+    // again, and that release must be free to be held in turn.
+    HeldRelease held = gs_heldRelease;
+    gs_heldRelease = HeldRelease();
+
+    if ( held.win )
+    {
+        wxGTKImpl::WindowButtonReleaseCallback(held.win, held.event,
+                                               held.button, held.x, held.y);
+    }
+
+    gdk_event_unref(held.event);
+}
+
 } // anonymous namespace
 
 extern "C" {
@@ -4037,12 +4097,22 @@ wx_gtk_button_pressed_callback(GtkGestureClick* gesture,
     if ( ButtonEventAlreadyProcessed(gdk_event) )
         return;
 
-    if ( wxGTKImpl::WindowButtonPressCallback(
-                win, gdk_event,
-                button, nPress, x, y) )
-    {
+    // A release still held from an earlier press came before this one.
+    DeliverHeldRelease();
+
+    const int outerButton = gs_buttonBeingPressed;
+    gs_buttonBeingPressed = button;
+
+    const bool handled = wxGTKImpl::WindowButtonPressCallback(
+                            win, gdk_event,
+                            button, nPress, x, y);
+
+    gs_buttonBeingPressed = outerButton;
+
+    if ( handled )
         gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-    }
+
+    DeliverHeldRelease();
 }
 
 static void
@@ -4061,6 +4131,9 @@ wx_gtk_button_released_callback(GtkGestureClick* gesture,
         GdkModifierType(gs_buttonState & ~wxGTKButtonMaskFor(button));
 
     if ( ButtonEventAlreadyProcessed(gdk_event) )
+        return;
+
+    if ( HoldReleaseDuringPress(win, gdk_event, button, x, y) )
         return;
 
     if ( wxGTKImpl::WindowButtonReleaseCallback(
