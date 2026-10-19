@@ -68,7 +68,17 @@ wxFLAGS_MEMBER(wxCB_DROPDOWN)
 
 wxEND_FLAGS( wxComboBoxStyle )
 
+#ifdef __WXGTK4__
+// wxComboBox is the generic, wxOwnerDrawnComboBox-based one there, and the
+// runtime base has to say so: wxVListBoxComboPopup asks
+// wxDynamicCast(combo, wxOwnerDrawnComboBox) before it will measure or draw
+// an item, and a class info claiming wxControl fails that even though the
+// C++ type does derive from it.
+wxIMPLEMENT_DYNAMIC_CLASS_XTI(wxComboBox, wxOwnerDrawnComboBox,
+                              "wx/combobox.h");
+#else
 wxIMPLEMENT_DYNAMIC_CLASS_XTI(wxComboBox, wxControl, "wx/combobox.h");
+#endif
 
 wxBEGIN_PROPERTIES_TABLE(wxComboBox)
 wxEVENT_PROPERTY( Select, wxEVT_COMBOBOX, wxCommandEvent )
