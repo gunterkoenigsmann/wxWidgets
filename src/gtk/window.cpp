@@ -4968,6 +4968,38 @@ void wxWindowGTK::GTKCreateScrolledWindowWith(GtkWidget* view)
     gtk_widget_set_visible(view, TRUE);
 }
 
+#ifdef __WXGTK4__
+// GtkScrolledWindow records every touchpad scroll in a capture-phase
+// controller, which sees the event before the window does, and when the
+// finger lifts it glides its own adjustments at the gesture's speed. Here the
+// window's wxEVT_MOUSEWHEEL handler decides what a wheel event scrolls, and it
+// may have scrolled something else entirely -- wxMaxima scrolls a selected
+// matrix -- so the glide moves the window when nothing asked for it. Clearing
+// the KINETIC flag stops the controllers from starting one, which is also how
+// these windows behave under GTK3.
+static void wxGTKDisableKineticScrolling(GtkWidget* scrolledWindow)
+{
+    GListModel* const controllers =
+        gtk_widget_observe_controllers(scrolledWindow);
+    const guint count = g_list_model_get_n_items(controllers);
+    for ( guint n = 0; n < count; n++ )
+    {
+        GObject* const c = G_OBJECT(g_list_model_get_item(controllers, n));
+        if ( GTK_IS_EVENT_CONTROLLER_SCROLL(c) )
+        {
+            GtkEventControllerScroll* const scroll =
+                GTK_EVENT_CONTROLLER_SCROLL(c);
+            gtk_event_controller_scroll_set_flags(scroll,
+                GtkEventControllerScrollFlags(
+                    gtk_event_controller_scroll_get_flags(scroll) &
+                    ~GTK_EVENT_CONTROLLER_SCROLL_KINETIC));
+        }
+        g_object_unref(c);
+    }
+    g_object_unref(controllers);
+}
+#endif // __WXGTK4__
+
 bool wxWindowGTK::Create( wxWindow *parent,
                           wxWindowID id,
                           const wxPoint &pos,
@@ -5009,7 +5041,12 @@ bool wxWindowGTK::Create( wxWindow *parent,
     if (!HasFlag(wxHSCROLL) && !HasFlag(wxVSCROLL))
         m_widget = m_wxwindow;
     else
+    {
         GTKCreateScrolledWindowWith(m_wxwindow);
+#ifdef __WXGTK4__
+        wxGTKDisableKineticScrolling(m_widget);
+#endif
+    }
     g_object_ref(m_widget);
 
     if (m_parent)

@@ -698,6 +698,63 @@ TEST_CASE("Window::BorderReplaysOntoInterior", "[window][paint]")
 
     cairo_surface_destroy(recording);
 }
+
+// Returns how many of the widget's scroll controllers would start a kinetic
+// glide when a touchpad gesture ends, and how many scroll controllers it has.
+static void
+CountKineticScrollControllers(GtkWidget* widget, int* kinetic, int* total)
+{
+    *kinetic = *total = 0;
+
+    GListModel* const controllers = gtk_widget_observe_controllers(widget);
+    const guint count = g_list_model_get_n_items(controllers);
+    for ( guint n = 0; n < count; n++ )
+    {
+        GObject* const c = G_OBJECT(g_list_model_get_item(controllers, n));
+        if ( GTK_IS_EVENT_CONTROLLER_SCROLL(c) )
+        {
+            ++*total;
+            if ( gtk_event_controller_scroll_get_flags(
+                        GTK_EVENT_CONTROLLER_SCROLL(c)) &
+                    GTK_EVENT_CONTROLLER_SCROLL_KINETIC )
+                ++*kinetic;
+        }
+        g_object_unref(c);
+    }
+    g_object_unref(controllers);
+}
+
+// A window handles wheel events itself, and when its handler scrolls
+// something else -- wxMaxima scrolls a selected matrix -- the window must not
+// move. GtkScrolledWindow records every touchpad scroll in a capture-phase
+// controller, before wx sees it, and glides its own adjustments when the
+// finger lifts, so the window jumped at the end of every such gesture.
+//
+// Injecting a touchpad gesture needs a Wayland compositor that can fake one,
+// docs/gtk/probes/touchpad-scroll-end.cpp does that under sway; this checks
+// the controllers that would act on it.
+TEST_CASE_METHOD(WindowTestCase, "Window::ScrolledWindowNoKineticGlide",
+                 "[window][scroll]")
+{
+    int kinetic, total;
+
+    // The control: a plain GtkScrolledWindow does glide, so the walk below
+    // finds the controllers it is looking for.
+    GtkWidget* const native = gtk_scrolled_window_new();
+    g_object_ref_sink(native);
+    CountKineticScrollControllers(native, &kinetic, &total);
+    g_object_unref(native);
+    REQUIRE( total > 0 );
+    REQUIRE( kinetic > 0 );
+
+    std::unique_ptr<wxScrolledWindow> const win(
+        new wxScrolledWindow(wxTheApp->GetTopWindow(), wxID_ANY));
+    REQUIRE( GTK_IS_SCROLLED_WINDOW(win->GetHandle()) );
+
+    CountKineticScrollControllers(win->GetHandle(), &kinetic, &total);
+    CHECK( total > 0 );
+    CHECK( kinetic == 0 );
+}
 #endif // __WXGTK4__
 
 #if wxUSE_HELP
