@@ -51,8 +51,6 @@
 
 #ifdef wxHAVE_WAYLAND_SESSION_MANAGEMENT
     #include "wx/gtk/private/wayland.h"
-
-    static constexpr const char* TRACE_XDGSM = "xdgsm";
 #endif // wxHAVE_WAYLAND_SESSION_MANAGEMENT
 
 #define TRACE_TLWSIZE "tlwsize"
@@ -730,6 +728,8 @@ void wxTopLevelWindowGTK::GTKConfigureEvent(int x, int y)
 #endif
 
 #ifdef wxHAS_WAYLAND_XDG_SESSION
+
+static constexpr const char* TRACE_XDGSM = "xdgsm";
 
 using wxWayland::wl_unique_ptr;
 
