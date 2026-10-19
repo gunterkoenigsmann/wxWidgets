@@ -20,6 +20,10 @@
 
 #include <memory>
 
+#if wxUSE_COMBOCTRL
+    #include "wx/combo.h"
+#endif
+
 class CheckBoxTestCase
 {
 public:
@@ -139,5 +143,34 @@ TEST_CASE_METHOD(CheckBoxTestCase, "CheckBox::InvalidStyles", "[checkbox]")
 }
 
 #endif // wxHAS_3STATE_CHECKBOX
+
+#if wxUSE_COMBOCTRL
+
+TEST_CASE("wxCheckBox::InsideBorderlessParent", "[checkbox]")
+{
+    // A container created with wxBORDER_NONE gives up its own frame and
+    // nothing else: the controls it holds keep theirs. wxComboCtrl is such a
+    // container whenever it is given a main control of its own, and the
+    // check box in samples/combo lost the frame around its indicator that way
+    // -- two pixels of it, invisible against the light background behind.
+    //
+    // The check is on the size rather than on the drawing because the frame is
+    // part of what the indicator measures: without it the whole control comes
+    // out narrower, whatever the theme draws.
+    wxWindow* const parent = wxTheApp->GetTopWindow();
+
+    std::unique_ptr<wxCheckBox> plain(new wxCheckBox(parent, wxID_ANY, "check"));
+
+    wxComboCtrl* const combo = new wxComboCtrl();
+    wxCheckBox* const inside = new wxCheckBox();
+    combo->SetMainControl(inside);
+    combo->Create(parent, wxID_ANY, wxEmptyString);
+    inside->Create(combo, wxID_ANY, "check");
+    const std::unique_ptr<wxComboCtrl> ensureDeleted(combo);
+
+    CHECK( inside->GetBestSize() == plain->GetBestSize() );
+}
+
+#endif // wxUSE_COMBOCTRL
 
 #endif // wxUSE_CHECKBOX

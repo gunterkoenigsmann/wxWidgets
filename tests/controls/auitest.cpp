@@ -32,6 +32,11 @@
 #include "asserthelper.h"
 #include "waitfor.h"
 
+#if defined(__WXGTK4__) && wxUSE_UIACTIONSIMULATOR
+    #include "wx/uiaction.h"
+    #include "wx/gtk/private/wrapgtk.h"
+#endif
+
 #ifdef __WXMSW__
     #include "wx/msw/wrapwin.h"
 #endif
@@ -76,6 +81,17 @@ public:
     TestAuiManager(wxWindow* managedWindow)
         : wxAuiManager(managedWindow)
     {
+    }
+
+    wxAuiDockUIPart* FindDockSizer()
+    {
+        for ( auto& part : m_uiParts )
+        {
+            if ( part.type == wxAuiDockUIPart::typeDockSizer )
+                return &part;
+        }
+
+        return nullptr;
     }
 
     wxAuiDockUIPart* FindPaneSizer()
@@ -378,6 +394,66 @@ TEST_CASE_METHOD(AuiManagerTestCase, "wxAuiManager::CloseMaximizedPane", "[aui]"
     CHECK( paneInfo2.IsShown() );
     CHECK_FALSE( paneInfo2.IsMaximized() );
 }
+
+#if defined(__WXGTK4__) && wxUSE_UIACTIONSIMULATOR
+
+// The cursor set on the managed window's own widget, which GTK4 shows over
+// every child that doesn't set one itself.
+static GdkCursor* GetFrameCursor(wxWindow* frame)
+{
+    return gtk_widget_get_cursor(frame->GetConnectWidget());
+}
+
+TEST_CASE_METHOD(AuiManagerTestCase, "wxAuiManager::SashCursorReset",
+                 "[aui][cursor]")
+{
+    if ( !EnableUITests() )
+        return;
+
+    // Plain windows, which don't set a cursor of their own: over a native
+    // control such as wxTextCtrl, its own cursor would hide the frame's one
+    // and the test would pass whatever the frame's cursor is.
+    wxWindow* const side = new wxWindow(frame.get(), wxID_ANY);
+    wxWindow* const center = new wxWindow(frame.get(), wxID_ANY);
+
+    REQUIRE( manager.AddPane(side, wxAuiPaneInfo().Left().
+        BestSize(200, 100).CaptionVisible(false)) );
+    REQUIRE( manager.AddPane(center, wxAuiPaneInfo().CenterPane()) );
+
+    manager.Update();
+    wxYield();
+
+    wxAuiDockUIPart* const sizer = manager.FindDockSizer();
+    REQUIRE( sizer );
+
+    const wxRect& r = sizer->rect;
+    const wxPoint sash =
+        frame->ClientToScreen(r.GetPosition() + wxPoint(r.width/2, r.height/2));
+
+    wxUIActionSimulator sim;
+
+    // Start outside the sash, so that moving onto it is a change.
+    sim.MouseMove(center->GetScreenRect().GetPosition() + wxPoint(50, 50));
+    wxYield();
+
+    // Without this the check at the end would pass for a pointer that never
+    // reached the sash at all.
+    sim.MouseMove(sash);
+    REQUIRE( WaitFor("sash cursor", [&]() {
+        return GetFrameCursor(frame.get()) != nullptr;
+    }) );
+
+    // Moving into the centre pane must remove the sizing cursor: nothing
+    // there asks for one.
+    sim.MouseMove(center->GetScreenRect().GetPosition() + wxPoint(50, 50));
+    WaitFor("cursor reset", [&]() {
+        return GetFrameCursor(frame.get()) == nullptr;
+    });
+
+    CHECK( GetFrameCursor(frame.get()) == nullptr );
+}
+
+#endif // __WXGTK4__ && wxUSE_UIACTIONSIMULATOR
 
 TEST_CASE_METHOD(AuiNotebookTestCase, "wxAuiNotebook::DoGetBestSize", "[aui]")
 {
