@@ -10,7 +10,13 @@
 #ifndef _WX_GTK_TEXTENTRY_H_
 #define _WX_GTK_TEXTENTRY_H_
 
+#ifdef __WXGTK4__
+typedef struct _GdkEvent GdkEvent;
+typedef GdkEvent wxGTKNativeKeyEvent;
+#else
 typedef struct _GdkEventKey GdkEventKey;
+typedef GdkEventKey wxGTKNativeKeyEvent;
+#endif
 typedef struct _GtkEditable GtkEditable;
 typedef struct _GtkEntry GtkEntry;
 
@@ -73,6 +79,12 @@ public:
     // Helper functions only used internally.
     wxTextCoalesceData* GTKGetCoalesceData() const { return m_coalesceData; }
 
+    // Called once the processing of a key press is finished, to flush any
+    // wxEVT_TEXT that was coalesced while it was being handled. Under GTK+ 3
+    // this comes from the "event-after" signal handler; under GTK+ 4, where
+    // that signal no longer exists, from the key event controller.
+    void GTKEntryOnKeypressEnd();
+
 protected:
     // This method must be called from the derived class Create() to connect
     // the handlers for the clipboard (cut/copy/paste) events.
@@ -98,7 +110,7 @@ protected:
 
     // Call this from the overridden wxWindow::GTKIMFilterKeypress() to use
     // GtkEntry IM context.
-    int GTKEntryIMFilterKeypress(GdkEventKey* event) const;
+    int GTKEntryIMFilterKeypress(wxGTKNativeKeyEvent* event) const;
 
     // If GTKEntryIMFilterKeypress() is not called (as multiline wxTextCtrl
     // uses its own IM), call this method instead to still notify wxTextEntry
