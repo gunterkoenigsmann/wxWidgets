@@ -3,6 +3,11 @@
 //
 //     wldrag move 360 340  down  move 400 380  move 500 450  up
 //
+// It can also scroll the way a touchpad does: "scroll DY" sends one
+// finger-sourced vertical axis event of DY pixels, and "scrollstop" ends the
+// gesture with the axis_stop a lifted finger produces. A wheel sends no
+// axis_stop, so only the finger source exercises what follows a gesture's end.
+//
 // Coordinates are absolute screen pixels. The extent they are expressed in
 // is the output's own size, which is asked for rather than assumed: a
 // mismatch does not fail, it silently scales every coordinate, and the run
@@ -118,6 +123,25 @@ int main(int argc, char** argv)
             zwlr_virtual_pointer_v1_button(p, now(), BTN_LEFT, st);
             zwlr_virtual_pointer_v1_frame(p);
             printf("%s\n", st ? "down" : "up");
+        }
+        else if ( !strcmp(argv[i], "scroll") && i + 1 < argc )
+        {
+            const double dy = atof(argv[++i]);
+            zwlr_virtual_pointer_v1_axis_source(p,
+                WL_POINTER_AXIS_SOURCE_FINGER);
+            zwlr_virtual_pointer_v1_axis(p, now(),
+                WL_POINTER_AXIS_VERTICAL_SCROLL, wl_fixed_from_double(dy));
+            zwlr_virtual_pointer_v1_frame(p);
+            printf("scroll %g\n", dy);
+        }
+        else if ( !strcmp(argv[i], "scrollstop") )
+        {
+            zwlr_virtual_pointer_v1_axis_source(p,
+                WL_POINTER_AXIS_SOURCE_FINGER);
+            zwlr_virtual_pointer_v1_axis_stop(p, now(),
+                WL_POINTER_AXIS_VERTICAL_SCROLL);
+            zwlr_virtual_pointer_v1_frame(p);
+            printf("scrollstop\n");
         }
         else if ( !strcmp(argv[i], "sleep") && i + 1 < argc )
         {

@@ -461,3 +461,33 @@ looks exactly like the bug and is not.
 The pane is floated through the manager rather than by dragging
 (`AUIDOCK_START_FLOATING`), so a failure here cannot be a failed undock
 wearing a re-dock's clothes.
+
+## `touchpad-scroll-end.cpp` — does the window move after the finger lifts?
+
+A `wxScrolledWindow` whose wheel handler either eats every event (`consume`,
+what wxMaxima does while a scrollable matrix is selected) or skips them
+(`skip`, the control). Driven under sway with fifteen 12 px finger scrolls and
+the `axis_stop` a lifted finger sends:
+
+```sh
+export SWAYSOCK=$(docs/gtk/probes/sway-up.sh)
+./touchpad-scroll-end consume &      # window fills the tiled output
+wldrag move 800 600 sleep 200 \
+       scroll 12 sleep 15 scroll 12 sleep 15 ... scrollstop
+```
+
+| build             | mode    | wheel events | rotation | final view start |
+|-------------------|---------|--------------|----------|------------------|
+| GTK3              | consume | 15           | -2160    | 0                |
+| GTK4, before fix  | consume | 15           | -375     | 493..496         |
+| GTK4, after fix   | consume | 15           | -375     | 0                |
+| GTK4, after fix   | skip    | 9..10        | -375     | 9                |
+
+Before the fix the window glided about 4900 px *after* the gesture although
+its handler had consumed every event: GtkScrolledWindow's capture-phase
+scroll controller is `KINETIC` and starts a deceleration of its own
+adjustments on `axis_stop`. The `skip` row is the control showing the input
+arrives and scrolls the window when wx is allowed to; GDK merges queued
+scroll events while the window repaints, so it counts fewer, larger events
+with the same total rotation. The rotation differs between GTK3 and GTK4
+because GTK4 converts touchpad pixels to detents and GTK3 does not.
