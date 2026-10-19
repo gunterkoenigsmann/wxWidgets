@@ -1229,7 +1229,15 @@ wxSize wxComboCtrlBase::DoGetSizeFromTextSize(int xlen, int ylen) const
     }
     else
     {
+#ifdef __WXGTK4__
+        // Measure a text control rather than a wxComboBox. GTK4 has no native
+        // combo box, so wxComboBox is itself a wxComboCtrl there -- creating
+        // one here to ask its height would ask this same function again, and
+        // not stop. A text entry is the part whose height is wanted anyway.
+        wxTextCtrl* cb = new wxTextCtrl;
+#else
         wxComboBox* cb = new wxComboBox;
+#endif
 #ifndef __WXGTK3__
         // GTK3 returns zero for the preferred size of a hidden widget
         cb->Hide();
