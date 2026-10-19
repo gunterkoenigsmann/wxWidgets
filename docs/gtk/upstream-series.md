@@ -51,26 +51,26 @@ job before the port lands is a question for them, and it is #106's.
 
 | step | branch | files | + | − | what it is |
 |---|---|---:|---:|---:|---|
-| 1 | `01-shared` | 28 | 427 | 28 | the changes outside the GTK backend, as 23 commits |
-| 2 | `02-private` | 21 | 1865 | 11 | private headers and the GTK+ 3 compatibility shim |
-| 3 | `03-core` | 8 | 4331 | 307 | wxWindow, the event loop and the wxPizza container |
-| 4 | `04-toplevel` | 9 | 1586 | 110 | top level windows, frames, dialogs and popups |
+| 1 | `01-shared` | 30 | 449 | 33 | the changes outside the GTK backend, as 27 commits |
+| 2 | `02-private` | 21 | 1959 | 12 | private headers and the GTK+ 3 compatibility shim |
+| 3 | `03-core` | 8 | 4616 | 300 | wxWindow, the event loop and the wxPizza container |
+| 4 | `04-toplevel` | 9 | 1578 | 110 | top level windows, frames, dialogs and popups |
 | 5 | `05-drawing` | 9 | 1415 | 37 | device contexts, the renderer and overlays |
-| 6 | `06-menus` | 5 | 1746 | 87 | menus on GMenuModel and GAction |
-| 7 | `07-text` | 10 | 1869 | 52 | text entry and text control |
+| 6 | `06-menus` | 5 | 1834 | 87 | menus on GMenuModel and GAction |
+| 7 | `07-text` | 10 | 1884 | 52 | text entry and text control |
 | 8 | `08-items` | 12 | 2228 | 160 | item containers |
 | 9 | `09-controls` | 42 | 3507 | 212 | the remaining controls |
 | 10 | `10-dialogs` | 10 | 774 | 32 | the standard dialogs |
 | 11 | `11-clipboard` | 4 | 1244 | 4 | clipboard and drag and drop |
-| 12 | `12-a11y` | 2 | 1011 | 0 | accessibility |
+| 12 | `12-a11y` | 2 | 1024 | 0 | accessibility |
 | 13 | `13-taskbar` | 3 | 1227 | 43 | the taskbar icon and the status notifier |
 | 14 | `14-webview` | 4 | 580 | 77 | wxWebView on WebKitGTK 6 |
-| 15 | `15-rest` | 15 | 420 | 33 | the last of the backend |
-| 16 | `16-tests` | 35 | 2486 | 123 | tests and samples |
-| 17 | `17-build` | 19 | 1310 | 42 | the build system and the configure switch |
-| 18 | `18-ci` | 10 | 2592 | 9 | a CI job for the new toolkit, and what it runs |
+| 15 | `15-rest` | 16 | 420 | 34 | the last of the backend |
+| 16 | `16-tests` | 36 | 2942 | 123 | tests and samples |
+| 17 | `17-build` | 19 | 1302 | 44 | the build system and the configure switch |
+| 18 | `18-ci` | 10 | 2609 | 9 | a CI job for the new toolkit, and what it runs |
 
-30,618 insertions across 246 files. The largest step is 4,331 lines and the
+31,592 insertions across 250 files. The largest step is 4,616 lines and the
 median is 1,500, which is the size the request asked for.
 
 ## Why this order
@@ -108,10 +108,10 @@ Vadim asked for it after seeing the first pull request:
 
 He is right about what step 1 is: the rule that builds it is "everything
 outside `src/gtk`", so what it collects have nothing in common beyond that.
-There are 29 reasons in it -- six fixes that have nothing to do with GTK 4 at
-all, twenty changes that are conditional on it, and three that only document
-what the toolkit cannot do -- and it is now 29 commits, each one reason, each
-message saying why rather than what.
+There are 27 reasons in it -- five fixes that have nothing to do with GTK 4 at
+all, eighteen changes that are conditional on it, and four that only document
+what the toolkit can and cannot do -- and it is 27 commits, each one reason,
+each message saying why rather than what.
 
 That branch is therefore written by hand and not by the generator. The
 generator still cuts the same content into a scratch branch and compares:
@@ -157,21 +157,29 @@ there are no later corrections to fold in, because each file appears once.
 
 ## What it is based on
 
-The series starts at `fb2e182` (4 October), which is upstream master. The
-port branch was merged with it first, so this applies to master as it stands.
-Eight files conflicted in that merge; the resolutions are in its commit
-message.
+The series starts at `2f30400` (11 October), upstream master just after the
+3.3.4 release. The port branch was merged with it first, so this applies to
+master as it stands. Four files conflicted in that merge; the resolutions are
+in its commit message.
 
-Step 1 was rebased by hand onto the new base. Six of its commits left it
-because upstream has taken those fixes from wxWidgets/wxWidgets#26968, partly
-reworded, and a seventh because the port dropped its workaround once upstream
-had the real fix. One commit came in: the half of the AUI mouse capture fix that
-wxWidgets/wxWidgets#27025 did not take.
+Step 1 was rebased by hand onto the new base, which it applied to unchanged.
+What changed is the port since the previous cut. One commit was rewritten,
+because the port no longer updates its menus from idle: GTK 4 menu bars now
+send wxEVT_MENU_OPEN, so what is left of the change is not to look for
+Ubuntu's global menu bar there. Four commits came in, for the shared halves of
+fixes made in the port since: wxNativeEncodingInfo's missing constructor, the
+wxQt selection rectangle, SetAccessibleName() working under GTK 4, and the
+Cairo clip to several rectangles that crashes cairo when GSK replays it in
+parts.
 
-The first cut, on `0820518` (1 September), lost four files from step 1 the
-same way.
+The cut before this one, on `fb2e182` (4 October), lost six commits from step
+1 to wxWidgets/wxWidgets#26968 and one to a workaround the port dropped, and
+gained the half of the AUI mouse capture fix that wxWidgets/wxWidgets#27025
+did not take. The first cut, on `0820518` (1 September), lost four files from
+step 1 the same way.
 
-This cut is on the fork as `upstream-series-next/*`. `upstream-series/01-shared`
+This cut is on the fork as `upstream-series-3.3.4/*`, beside the previous
+one's `upstream-series-next/*`. `upstream-series/01-shared`
 is what wxWidgets/wxWidgets#26968 was opened from, so it is replaced only once
 that is settled.
 
@@ -179,12 +187,12 @@ that is settled.
 
 | | |
 |---|---|
-| the split loses nothing | `git diff upstream-series/18-ci <port> -- . ':!docs' ':!CLAUDE.md' ':!.github' ':!<the three scripts below>'` is **empty** |
+| the split loses nothing | `git diff upstream-series/18-ci <port> -- . ':!docs' ':!CLAUDE.md' ':!.claude' ':!.github' ':!<the three scripts below>'` is **empty** |
 | step 1 keeps the existing build green | GTK+ 3, configured and built from a clean directory at that step: **rc=0** |
 | **every step after it builds too** | all 18 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors** each, and **0 warnings** in steps 17 and 18, the two whose logs the script keeps |
-| the series produces the port | the port under GTK4 from a clean directory, with `--enable-accessibility` and the three build fixes made after this cut: the GUI suite passes **955 cases, 49,126 assertions**, and the wxAccessible bridge probe passes |
-| the port still passes on the new base | GTK+ 3 from a clean directory: **940 cases**, all passing |
-| and under a toolkit with no GTK in it | **not rechecked** for this cut: no Qt here. It last held for steps 1 to 16 |
+| the series produces the port | the port's own CI on the tip this was cut from (`d5a33d5`, the head of #269): the GTK4 jobs, GTK+ 3, Qt 5.15 and 6.10, MSW and macOS all **green** |
+| the port passes on the new base | at the 3.3.4 merge (#263), from clean directories: GTK4 with `--enable-accessibility` **970 cases** and the wxAccessible bridge probe, GTK+ 3 **955 cases**, all passing |
+| and under a toolkit with no GTK in it | step by step **not rechecked** for this cut: no Qt here. It last held for steps 1 to 16; the port's Qt jobs above are green |
 
 The row on every step replaces an argument that was wrong. It used to say
 steps 2 to 15 did not need building because each is a subset of what step 16 contains and
