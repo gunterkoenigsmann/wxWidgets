@@ -2692,11 +2692,20 @@ void wxCairoContext::Clip( const wxRegion& region )
     // Create a path with all the rectangles in the region
     wxGraphicsPath path = GetRenderer()->CreatePath();
     wxRegionIterator ri(region);
+    int numRects = 0;
     while (ri)
     {
         path.AddRectangle(ri.GetX(), ri.GetY(), ri.GetW(), ri.GetH());
+        ++numRects;
         ++ri;
     }
+
+#ifdef __WXGTK4__
+    if ( numRects > 1 )
+        wxGTKMarkMultiRectClip(m_context);
+#else
+    wxUnusedVar(numRects);
+#endif
 
     // Put it in the context
     cairo_path_t* cp = (cairo_path_t*) path.GetNativePath() ;
