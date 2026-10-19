@@ -48,6 +48,10 @@ struct WXDLLIMPEXP_CORE wxNativeEncodingInfo
     int      charset;
 #elif defined(wxHAS_UTF8_FONTS)
     // ports using UTF-8 for text don't need encoding information for fonts
+    wxNativeEncodingInfo()
+        : facename()
+        , encoding(wxFONTENCODING_SYSTEM)
+    { }
 #else
     #error "Unsupported toolkit"
 #endif
