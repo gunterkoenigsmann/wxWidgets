@@ -417,6 +417,12 @@ function(wx_set_target_properties target_name)
 
     # Set common compile definitions
     target_compile_definitions(${target_name} PRIVATE WXBUILDING)
+    # Definitions that belong to wx's own compilation and must not reach the
+    # applications built against it -- see wxTOOLKIT_OWN_DEFINITIONS in
+    # toolkit.cmake.
+    if(wxTOOLKIT_OWN_DEFINITIONS)
+        target_compile_definitions(${target_name} PRIVATE ${wxTOOLKIT_OWN_DEFINITIONS})
+    endif()
     if(NOT wxBUILD_DEBUG_LEVEL STREQUAL "Default")
         # This must be PUBLIC as the application code must use the same
         # value as the library, otherwise it would still use the assert
