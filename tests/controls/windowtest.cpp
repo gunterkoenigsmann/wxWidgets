@@ -492,6 +492,66 @@ TEST_CASE_METHOD(WindowTestCase, "Window::ReleaseAfterLeftDownHandler",
     CHECK( upsDuringDown == 0 );
     CHECK( upHadCapture );
 }
+
+TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterLayoutChange",
+                 "[window][mouse]")
+{
+    if ( !EnableUITests() )
+        return;
+
+    m_window->SetSize(wxSize(200, 100));
+
+    wxWindow* const left =
+        new wxWindow(m_window, wxID_ANY, wxPoint(0, 0), wxSize(150, 100));
+    wxWindow* const right =
+        new wxWindow(m_window, wxID_ANY, wxPoint(150, 0), wxSize(50, 100));
+
+    int leftMotions = 0;
+    int leftDowns = 0;
+    int rightDowns = 0;
+    int ups = 0;
+    left->Bind(wxEVT_MOTION, [&](wxMouseEvent&) { ++leftMotions; });
+    left->Bind(wxEVT_LEFT_DOWN, [&](wxMouseEvent&) { ++leftDowns; });
+    right->Bind(wxEVT_LEFT_DOWN, [&](wxMouseEvent&) { ++rightDowns; });
+    left->Bind(wxEVT_LEFT_UP, [&](wxMouseEvent&) { ++ups; });
+    right->Bind(wxEVT_LEFT_UP, [&](wxMouseEvent&) { ++ups; });
+
+    m_window->Refresh();
+    m_window->Update();
+
+    wxUIActionSimulator sim;
+    sim.MouseMove(m_window->ClientToScreen(wxPoint(120, 50)));
+
+    // Without this, the click below would not be a press over a window that
+    // has moved away, whatever window got it.
+    WaitFor("the pointer over the left window",
+            [&]() { return leftMotions > 0; });
+    REQUIRE( leftMotions > 0 );
+
+    // Move the boundary to the left of the pointer, which does not move.
+    // Painting comes after layout, so a paint at the new size shows that the
+    // move has really happened.
+    bool rightRepainted = false;
+    right->Bind(wxEVT_PAINT, [&](wxPaintEvent&)
+    {
+        wxPaintDC dc(right);
+        if ( right->GetClientSize().x == 100 )
+            rightRepainted = true;
+    });
+
+    left->SetSize(100, 100);
+    right->SetSize(100, 0, 100, 100);
+    right->Refresh();
+
+    WaitFor("the new layout", [&]() { return rightRepainted; });
+
+    sim.MouseClick();
+
+    WaitFor("the button release", [&]() { return ups > 0; });
+
+    CHECK( rightDowns == 1 );
+    CHECK( leftDowns == 0 );
+}
 #endif // wxUSE_UIACTIONSIMULATOR
 
 #ifdef __WXGTK4__

@@ -3450,6 +3450,15 @@ frame clock's phases, not synchronously, so:
   its own press is still running is now held until that handler returns
   (`Window::ReleaseAfterLeftDownHandler`). Under Wayland `Update()` does not
   pump at all, so this was X11 only.
+* GTK4 does not hit-test a button press: it sends it to the widget it last
+  found under the pointer, and it looks again only on motion and at the end
+  of a drag -- before the release reaches wx, so before anything the release
+  changes. `wxAuiManager` and `wxSplitterWindow` move the sash to the pointer
+  on release, and pressing again without moving the pointer, to drag the sash
+  back, sent the press to the window the sash had just left. Each press is
+  now sent to the window `gtk_widget_pick()` finds in the current layout, and
+  the motion and release that follow it go to the same window
+  (`Window::PressAfterLayoutChange`). This happens on Wayland and X11 alike.
 * `ClientToScreen()`/`ScreenToClient()` asked GTK where each widget was, which
   is stale from the moment a window is shown, hidden or moved until the next
   frame. wx knows where it put its own children regardless, so it now walks its
