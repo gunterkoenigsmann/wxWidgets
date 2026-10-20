@@ -3468,7 +3468,9 @@ frame clock's phases, not synchronously, so:
   scrollbar's raw press and release, and a press made with no button held
   ends the block in any case, since it cannot belong to the scrollbar's drag
   (`Window::PressAfterScrollbarClick`, which hides the scrollbar mid-drag so
-  that its release goes unseen).
+  that its release goes unseen). That test caught wxGTK3 too, which blocks the
+  mouse the same way and never saw the release either, so the safety net
+  covers both.
 * `ClientToScreen()`/`ScreenToClient()` asked GTK where each widget was, which
   is stale from the moment a window is shown, hidden or moved until the next
   frame. wx knows where it put its own children regardless, so it now walks its
