@@ -603,10 +603,11 @@ TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterScrollbarClick",
         sim.MouseUp();
         wxYield();
 
-#ifdef __WXGTK__
+#ifdef __WXGTK3__
         FAIL("Dragging the scrollbar thumb did not scroll.");
 #else
-        // Other ports may place or size the scrollbar differently.
+        // Other ports, and GTK 2 with its stepper arrows, may put the thumb
+        // somewhere else.
         WARN("Dragging the scrollbar thumb did not scroll; nothing to check.");
         return;
 #endif
