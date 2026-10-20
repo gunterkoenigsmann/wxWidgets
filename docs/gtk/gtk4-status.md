@@ -3442,6 +3442,14 @@ frame clock's phases, not synchronously, so:
   returns long before the clock next ticks. It now asks for a frame and pumps
   until the clock reports one, bounded by a deadline so a window that is never
   presented cannot hang it.
+* That pump dispatches input too, which `gdk_window_process_updates()` never
+  did. `wxAuiToolBar` calls `Update()` in its `wxEVT_LEFT_DOWN` handler before
+  capturing the mouse, so on X11 a quick click's release arrived first, the
+  capture was never given back, and every later click -- on any sash, in any
+  window -- went to the toolbar. A release that arrives while the handler of
+  its own press is still running is now held until that handler returns
+  (`Window::ReleaseAfterLeftDownHandler`). Under Wayland `Update()` does not
+  pump at all, so this was X11 only.
 * `ClientToScreen()`/`ScreenToClient()` asked GTK where each widget was, which
   is stale from the moment a window is shown, hidden or moved until the next
   frame. wx knows where it put its own children regardless, so it now walks its

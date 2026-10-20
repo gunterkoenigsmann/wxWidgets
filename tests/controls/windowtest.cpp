@@ -426,6 +426,74 @@ TEST_CASE_METHOD(WindowTestCase, "Window::Mouse", "[window]")
     CHECK(!m_window->HasCapture());
 }
 
+#if wxUSE_UIACTIONSIMULATOR
+// wxAuiToolBar repaints its pressed button with Update() before capturing the
+// mouse in its wxEVT_LEFT_DOWN handler, and gives the capture back in its
+// wxEVT_LEFT_UP handler only if it holds it. A button release delivered while
+// the down handler is still running finds no capture to give back, and the one
+// taken afterwards then sends every later click, including those on any sash,
+// to this window.
+TEST_CASE_METHOD(WindowTestCase, "Window::ReleaseAfterLeftDownHandler",
+                 "[window][mouse]")
+{
+    if ( !EnableUITests() )
+        return;
+
+    m_window->SetSize(wxSize(200, 200));
+    m_window->Refresh();
+    m_window->Update();
+
+    bool inDown = false;
+    bool releasedDuringDown = false;
+    int upsDuringDown = 0;
+    int ups = 0;
+    bool upHadCapture = false;
+
+    m_window->Bind(wxEVT_LEFT_DOWN, [&](wxMouseEvent&)
+    {
+        inDown = true;
+        m_window->Refresh();
+        m_window->Update();
+        // Whether the release had already arrived by now: only then does this
+        // test say anything about where it was delivered.
+        releasedDuringDown = !wxGetMouseState().LeftIsDown();
+        m_window->CaptureMouse();
+        inDown = false;
+    });
+    m_window->Bind(wxEVT_LEFT_UP, [&](wxMouseEvent&)
+    {
+        ++ups;
+        if ( inDown )
+            ++upsDuringDown;
+        upHadCapture = m_window->HasCapture();
+        if ( m_window->HasCapture() )
+            m_window->ReleaseMouse();
+    });
+
+    wxUIActionSimulator sim;
+    sim.MouseMove(m_window->ClientToScreen(wxPoint(100, 100)));
+    wxYield();
+    sim.MouseClick();
+
+    WaitFor("the button release", [&]() { return ups > 0; });
+
+    // A capture left behind would break every later test using the mouse.
+    while ( m_window->HasCapture() )
+        m_window->ReleaseMouse();
+
+    if ( !releasedDuringDown )
+    {
+        WARN("The release came after the wxEVT_LEFT_DOWN handler; "
+             "nothing to check.");
+        return;
+    }
+
+    CHECK( ups == 1 );
+    CHECK( upsDuringDown == 0 );
+    CHECK( upHadCapture );
+}
+#endif // wxUSE_UIACTIONSIMULATOR
+
 #ifdef __WXGTK4__
 TEST_CASE_METHOD(WindowTestCase, "Window::DestroyOverlayRemovesNativeChild",
                  "[window][overlay]")
