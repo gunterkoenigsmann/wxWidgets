@@ -552,6 +552,79 @@ TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterLayoutChange",
     CHECK( rightDowns == 1 );
     CHECK( leftDowns == 0 );
 }
+
+#if wxUSE_SCROLLBAR
+TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterScrollbarClick",
+                 "[window][mouse]")
+{
+    if ( !EnableUITests() )
+        return;
+
+    m_window->SetSize(wxSize(200, 100));
+
+    wxScrolledWindow* const scrolled =
+        new wxScrolledWindow(m_window, wxID_ANY,
+                             wxPoint(0, 0), wxSize(150, 100),
+                             wxVSCROLL | wxALWAYS_SHOW_SB);
+    scrolled->SetScrollRate(0, 10);
+    scrolled->SetVirtualSize(150, 1000);
+
+    wxWindow* const other =
+        new wxWindow(m_window, wxID_ANY, wxPoint(150, 0), wxSize(50, 100));
+
+    int otherDowns = 0;
+    int otherUps = 0;
+    other->Bind(wxEVT_LEFT_DOWN, [&](wxMouseEvent&) { ++otherDowns; });
+    other->Bind(wxEVT_LEFT_UP, [&](wxMouseEvent&) { ++otherUps; });
+
+    m_window->Refresh();
+    m_window->Update();
+    wxYield();
+
+    // Drag the thumb of the scrollbar at the right edge downwards.
+    wxUIActionSimulator sim;
+    sim.MouseMove(scrolled->ClientToScreen(wxPoint(146, 5)));
+    wxYield();
+    sim.MouseDown();
+    wxYield();
+    for ( int y = 6; y < 60; y += 4 )
+    {
+        sim.MouseMove(scrolled->ClientToScreen(wxPoint(146, y)));
+        wxYield();
+    }
+
+    // Without the view actually scrolling, the click below would not follow
+    // a scrollbar drag at all.
+    WaitFor("the scrollbar to scroll",
+            [&]() { return scrolled->GetViewStart().y > 0; });
+    REQUIRE( scrolled->GetViewStart().y > 0 );
+
+    SECTION("Released over the scrollbar")
+    {
+    }
+
+    SECTION("Scrollbar hidden while held")
+    {
+        // The scrollbar never sees this release, as happens for reasons not
+        // yet known under KDE Wayland.
+        scrolled->Hide();
+        wxYield();
+    }
+
+    sim.MouseUp();
+    wxYield();
+
+    sim.MouseMove(other->ClientToScreen(wxPoint(25, 50)));
+    wxYield();
+    sim.MouseClick();
+
+    WaitFor("the press on the other window",
+            [&]() { return otherUps > 0; });
+
+    CHECK( otherDowns == 1 );
+    CHECK( otherUps == 1 );
+}
+#endif // wxUSE_SCROLLBAR
 #endif // wxUSE_UIACTIONSIMULATOR
 
 #ifdef __WXGTK4__

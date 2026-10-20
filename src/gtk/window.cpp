@@ -4183,6 +4183,8 @@ static void wxGTKRefreshButtonState(GdkEvent* gdk_event)
         gdk_event_get_modifier_state(gdk_event) & wxGTK_ALL_BUTTONS_MASK);
 }
 
+static void wxGTKUnblockScrollAfterLostRelease(GdkEvent* press);
+
 static void
 wx_gtk_button_pressed_callback(GtkGestureClick* gesture,
                                int nPress, double x, double y,
@@ -4194,6 +4196,8 @@ wx_gtk_button_pressed_callback(GtkGestureClick* gesture,
 
     const int button = int(gtk_gesture_single_get_current_button(
                                 GTK_GESTURE_SINGLE(gesture)));
+
+    wxGTKUnblockScrollAfterLostRelease(gdk_event);
 
     // A press made while another button is held belongs to the drag that
     // button started, wherever the pointer is now.
@@ -4364,37 +4368,75 @@ gtk_scrollbar_value_changed(GtkRange* range, wxWindow* win)
 // GtkRange has no button-press-event under GTK4, and the "event_after" dance
 // the GTK3 code needs -- because GtkRange consumes the release, so the thumb
 // release event has to be deferred until after its own handler has run -- is
-// unnecessary here: a gesture in the capture phase sees the press and the
-// release before GtkRange does, so both can be handled directly.
+// unnecessary here: a legacy controller in the capture phase sees the press
+// and the release before GtkRange does, so both can be handled directly.
+//
+// It must be a legacy controller rather than a GtkGestureClick: a click
+// gesture emits no "released" once it has been denied or reset mid-press,
+// and g_blockEventsOnScroll would then stay set.
+static guint32 gs_scrollbarPressTime = 0;
+
 extern "C" {
-static void
-wx_scrollbar_pressed(GtkGestureClick*, int, double, double, wxWindow* win)
+static gboolean
+wx_scrollbar_event(GtkEventControllerLegacy* controller,
+                   GdkEvent* event,
+                   wxWindow* win)
 {
-    g_blockEventsOnScroll = true;
-    win->m_mouseButtonDown = true;
-}
-
-static void
-wx_scrollbar_released(GtkGestureClick* gesture, int, double, double, wxWindow* win)
-{
-    g_blockEventsOnScroll = false;
-    win->m_mouseButtonDown = false;
-
-    if (win->m_isScrolling)
+    switch ( gdk_event_get_event_type(event) )
     {
-        win->m_isScrolling = false;
+        case GDK_BUTTON_PRESS:
+            g_blockEventsOnScroll = true;
+            gs_scrollbarPressTime = gdk_event_get_time(event);
+            win->m_mouseButtonDown = true;
+            break;
 
-        wxGtkScrollbar* const range = GTK_SCROLLBAR(gtk_event_controller_get_widget(
-                                          GTK_EVENT_CONTROLLER(gesture)));
+        case GDK_BUTTON_RELEASE:
+            g_blockEventsOnScroll = false;
+            win->m_mouseButtonDown = false;
 
-        const int orient = wxWindow::OrientFromScrollDir(
+            if ( win->m_isScrolling )
+            {
+                win->m_isScrolling = false;
+
+                wxGtkScrollbar* const range = GTK_SCROLLBAR(
+                    gtk_event_controller_get_widget(
+                        GTK_EVENT_CONTROLLER(controller)));
+
+                const int orient = wxWindow::OrientFromScrollDir(
                                         win->ScrollDirFromRange(range));
-        wxScrollWinEvent evt(wxEVT_SCROLLWIN_THUMBRELEASE,
-                                win->GetScrollPos(orient), orient);
-        evt.SetEventObject(win);
-        win->GTKProcessEvent(evt);
+                wxScrollWinEvent evt(wxEVT_SCROLLWIN_THUMBRELEASE,
+                                     win->GetScrollPos(orient), orient);
+                evt.SetEventObject(win);
+                win->GTKProcessEvent(evt);
+            }
+            break;
+
+        default:
+            break;
     }
+
+    return GDK_EVENT_PROPAGATE;
 }
+}
+
+// The scrollbar does not see its release if it is hidden or unmapped while
+// the button is held, and possibly in other cases: under KDE Wayland, a click
+// on wxMaxima's worksheet scrollbar was never followed by a release. A press
+// made with no button held can't belong to the scrollbar's drag, so the drag
+// is over and the mouse must no longer be blocked.
+static void wxGTKUnblockScrollAfterLostRelease(GdkEvent* press)
+{
+    if ( !g_blockEventsOnScroll || !press )
+        return;
+
+    // The scrollbar's own press, seen by an ancestor.
+    if ( gdk_event_get_time(press) == gs_scrollbarPressTime )
+        return;
+
+    if ( gdk_event_get_modifier_state(press) & wxGTK_ALL_BUTTONS_MASK )
+        return;
+
+    g_blockEventsOnScroll = false;
 }
 
 #else // !__WXGTK4__
@@ -5139,15 +5181,13 @@ void wxWindowGTK::GTKCreateScrolledWindowWith(GtkWidget* view)
         // over where the slider should be
 #ifdef __WXGTK4__
         {
-            GtkGesture* const click = gtk_gesture_click_new();
-            gtk_event_controller_set_propagation_phase(
-                GTK_EVENT_CONTROLLER(click), GTK_PHASE_CAPTURE);
-            g_signal_connect(click, "pressed",
-                             G_CALLBACK(wx_scrollbar_pressed), this);
-            g_signal_connect(click, "released",
-                             G_CALLBACK(wx_scrollbar_released), this);
-            gtk_widget_add_controller(GTK_WIDGET(m_scrollBar[dir]),
-                                      GTK_EVENT_CONTROLLER(click));
+            GtkEventController* const legacy =
+                gtk_event_controller_legacy_new();
+            gtk_event_controller_set_propagation_phase(legacy,
+                                                       GTK_PHASE_CAPTURE);
+            g_signal_connect(legacy, "event",
+                             G_CALLBACK(wx_scrollbar_event), this);
+            gtk_widget_add_controller(GTK_WIDGET(m_scrollBar[dir]), legacy);
         }
 #else
         g_signal_connect(m_scrollBar[dir], "button_press_event",
