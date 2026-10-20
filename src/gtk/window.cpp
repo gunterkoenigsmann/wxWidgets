@@ -4008,6 +4008,112 @@ void DeliverHeldRelease()
     gdk_event_unref(held.event);
 }
 
+// GTK4 sends a press to the widget it last found under the pointer, and it
+// looks for that widget only when the pointer moves and when a drag ends. The
+// latter happens before the release reaches the application, so before any
+// layout change the release makes: wxAuiManager and wxSplitterWindow move a
+// sash to the pointer on release, unless resizing live. Pressing again on the
+// sash without moving the pointer sent the press to the window the sash had
+// just been moved away from, which then got the whole drag.
+//
+// So every press is sent to the window under the pointer in the current
+// layout. The motion and the release of the same press still arrive at the
+// widget GTK chose, and follow the press to that window.
+struct PressRedirect
+{
+    wxWeakRef<wxWindow> from;
+    wxWeakRef<wxWindow> to;
+    GtkWidget* toWidget = nullptr;
+    int button = 0;
+};
+
+PressRedirect gs_pressRedirect;
+
+// Every widget whose events ConnectWidget() connects refers to its window
+// under this key, which is how a widget GTK picks leads back to a window.
+const char* const wxGTK_WINDOW_KEY = "wx-window";
+
+// Returns the window under the point (x, y) of the widget, and the widget its
+// events are connected to, or nullptr if there is no window there.
+wxWindowGTK* WindowUnderPoint(GtkWidget* widget, double x, double y,
+                              GtkWidget** windowWidget)
+{
+    GtkWidget* const root = GTK_WIDGET(gtk_widget_get_native(widget));
+    if ( !root )
+        return nullptr;
+
+    const graphene_point_t in = GRAPHENE_POINT_INIT(float(x), float(y));
+    graphene_point_t out;
+    if ( !gtk_widget_compute_point(widget, root, &in, &out) )
+        return nullptr;
+
+    for ( GtkWidget* w = gtk_widget_pick(root, out.x, out.y, GTK_PICK_DEFAULT);
+          w;
+          w = gtk_widget_get_parent(w) )
+    {
+        void* const win = g_object_get_data(G_OBJECT(w), wxGTK_WINDOW_KEY);
+        if ( win )
+        {
+            *windowWidget = w;
+            return static_cast<wxWindowGTK*>(win);
+        }
+    }
+
+    return nullptr;
+}
+
+// Sends the press arriving at the widget of the window to the window under the
+// pointer instead, if that is a different one.
+void RedirectPress(wxWindowGTK*& win, GtkWidget* widget, int button,
+                   double& x, double& y)
+{
+    gs_pressRedirect = PressRedirect();
+
+    // A capture decides where the press goes anyway.
+    if ( g_captureWindow )
+        return;
+
+    GtkWidget* toWidget = nullptr;
+    wxWindowGTK* const to = WindowUnderPoint(widget, x, y, &toWidget);
+    if ( !to || to == win )
+        return;
+
+    const graphene_point_t in = GRAPHENE_POINT_INIT(float(x), float(y));
+    graphene_point_t out;
+    if ( !gtk_widget_compute_point(widget, toWidget, &in, &out) )
+        return;
+
+    gs_pressRedirect.from = static_cast<wxWindow*>(win);
+    gs_pressRedirect.to = static_cast<wxWindow*>(to);
+    gs_pressRedirect.toWidget = toWidget;
+    gs_pressRedirect.button = button;
+
+    win = to;
+    x = out.x;
+    y = out.y;
+}
+
+// Sends an event of the redirected press to where the press went. A button of
+// 0 matches any, for motion.
+void FollowPressRedirect(wxWindowGTK*& win, GtkWidget* widget, int button,
+                         double& x, double& y)
+{
+    if ( !gs_pressRedirect.to ||
+            gs_pressRedirect.from.get() != static_cast<wxWindow*>(win) ||
+            (button && button != gs_pressRedirect.button) )
+        return;
+
+    const graphene_point_t in = GRAPHENE_POINT_INIT(float(x), float(y));
+    graphene_point_t out;
+    if ( !gtk_widget_compute_point(widget, gs_pressRedirect.toWidget,
+                                   &in, &out) )
+        return;
+
+    win = gs_pressRedirect.to.get();
+    x = out.x;
+    y = out.y;
+}
+
 } // anonymous namespace
 
 extern "C" {
@@ -4089,6 +4195,10 @@ wx_gtk_button_pressed_callback(GtkGestureClick* gesture,
     const int button = int(gtk_gesture_single_get_current_button(
                                 GTK_GESTURE_SINGLE(gesture)));
 
+    // A press made while another button is held belongs to the drag that
+    // button started, wherever the pointer is now.
+    const bool otherButtonDown = wxGTKAnyButtonDown();
+
     // Before the duplicate check below can return: a second delivery of the
     // same press is still a press, and the state has to hold either way.
     gs_buttonState =
@@ -4099,6 +4209,9 @@ wx_gtk_button_pressed_callback(GtkGestureClick* gesture,
 
     // A release still held from an earlier press came before this one.
     DeliverHeldRelease();
+
+    if ( !otherButtonDown )
+        RedirectPress(win, gtk_event_controller_get_widget(c), button, x, y);
 
     const int outerButton = gs_buttonBeingPressed;
     gs_buttonBeingPressed = button;
@@ -4133,6 +4246,10 @@ wx_gtk_button_released_callback(GtkGestureClick* gesture,
     if ( ButtonEventAlreadyProcessed(gdk_event) )
         return;
 
+    FollowPressRedirect(win, gtk_event_controller_get_widget(c), button, x, y);
+    if ( button == gs_pressRedirect.button )
+        gs_pressRedirect = PressRedirect();
+
     if ( HoldReleaseDuringPress(win, gdk_event, button, x, y) )
         return;
 
@@ -4152,6 +4269,17 @@ wx_gtk_motion_callback(GtkEventControllerMotion* controller,
         gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
 
     wxGTKRefreshButtonState(gdk_event);
+
+    // The release of a redirected press can go unseen, if a native widget
+    // takes it, and the next motion with no button down would follow the
+    // redirection for good.
+    if ( !wxGTKAnyButtonDown() )
+        gs_pressRedirect = PressRedirect();
+
+    FollowPressRedirect(win,
+                        gtk_event_controller_get_widget(
+                            GTK_EVENT_CONTROLLER(controller)),
+                        0, x, y);
 
     wxGTKImpl::WindowMotionCallback(win, gdk_event, x, y);
 }
@@ -6638,6 +6766,8 @@ void wxWindowGTK::ConnectWidget( GtkWidget *widget )
         g_signal_connect (clickGesture, "released",
                           G_CALLBACK (wx_gtk_button_released_callback), this);
         gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(clickGesture));
+
+        g_object_set_data(G_OBJECT(widget), wxGTK_WINDOW_KEY, this);
 
         GtkEventController* const motionController = gtk_event_controller_motion_new();
         g_signal_connect (motionController, "motion",
