@@ -2713,9 +2713,10 @@ and immediately blocked: `GtkRange` consumes the button release, so the
 thumb-release event has to be deferred via `event_after` until after
 `GtkRange`'s own handler has run.
 
-A single `GtkGestureClick` in the **capture** phase sees the press and the
-release before `GtkRange` does, so the deferral is unnecessary and the three
-handlers collapse to two straightforward callbacks.
+A single controller in the **capture** phase sees the press and the release
+before `GtkRange` does, so the deferral is unnecessary and the three handlers
+collapse to one. It was a `GtkGestureClick` at first; it is a legacy
+controller now, because the gesture's "released" did not always come.
 
 ### The obstacle that cost the most time, and it was mundane
 
@@ -3459,6 +3460,15 @@ frame clock's phases, not synchronously, so:
   now sent to the window `gtk_widget_pick()` finds in the current layout, and
   the motion and release that follow it go to the same window
   (`Window::PressAfterLayoutChange`). This happens on Wayland and X11 alike.
+* wx ignores the mouse while a scrollbar is held, and stopped doing so only
+  when the scrollbar's `GtkGestureClick` emitted "released". Under KDE Wayland
+  a click on wxMaxima's worksheet scrollbar never got one, and from then on no
+  wx window saw a press: sashes, toolbars and the worksheet all went dead,
+  while the native menu still worked. A legacy controller now watches the
+  scrollbar's raw press and release, and a press made with no button held
+  ends the block in any case, since it cannot belong to the scrollbar's drag
+  (`Window::PressAfterScrollbarClick`, which hides the scrollbar mid-drag so
+  that its release goes unseen).
 * `ClientToScreen()`/`ScreenToClient()` asked GTK where each widget was, which
   is stale from the moment a window is shown, hidden or moved until the next
   frame. wx knows where it put its own children regardless, so it now walks its
@@ -5062,9 +5072,9 @@ legacy controller hears the release, which is what #124 hooks.
 Worth one caution, since the two look interchangeable: this is `GtkScale`
 specifically. The same probe against a `GtkScrollbar` gets `released` as
 expected, so the scrollbar tracking in `window.cpp` -- which clears the global
-`g_blockEventsOnScroll` from that handler -- is not affected and needs no
-change. That was checked because it looked like the same bug and would have
-been much worse; it is not.
+`g_blockEventsOnScroll` from that handler -- looked unaffected. It was not,
+in the end: under KDE Wayland a scrollbar click went without "released", see
+`Window::PressAfterScrollbarClick`.
 
 ## Progress update 53: the delayed scroll behind #116
 
