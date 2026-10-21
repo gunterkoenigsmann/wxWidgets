@@ -31,6 +31,11 @@
 #include "gtklog.h"
 #include "waitfor.h"
 
+#if wxUSE_TASKBARICON && defined(__WXGTK4__)
+    #include "wx/taskbar.h"
+    #include "wx/gtk/private/wrapgdk.h"
+#endif
+
 class DestroyOnScopeExit
 {
 public:
@@ -224,3 +229,101 @@ TEST_CASE("wxMDIChildFrame::DestroyRemovesThePage", "[mdi][gtk]")
 #endif // __WXGTK4__
 
 #endif // wxUSE_MDI
+
+#if wxUSE_TASKBARICON && defined(__WXGTK4__)
+
+// A click on a tray icon may only raise a window under Wayland if the token
+// the panel passes over just before Activate is used for it: KWin refuses to
+// raise a window presented without one. KDE's panel passes it with
+// ProvideXdgActivationToken.
+//
+// The item is reached through the session bus like a panel reaches it, so
+// this needs one, and is skipped without. Whether the token is then given
+// to GDK can only be checked under Wayland, where GDK keeps it.
+TEST_CASE("wxTaskBarIcon::ActivationToken", "[taskbaricon][gtk]")
+{
+    GDBusConnection* const conn =
+        g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if ( !conn )
+    {
+        WARN("Skipping the test: no D-Bus session bus.");
+        return;
+    }
+
+    wxTaskBarIcon icon;
+
+    bool activated = false;
+    icon.Bind(wxEVT_TASKBAR_LEFT_DCLICK,
+              [&activated](wxTaskBarIconEvent&) { activated = true; });
+
+    // Exports the item on the process's session bus connection, which is
+    // the one g_bus_get_sync() above returned, too.
+    REQUIRE( icon.SetIcon(wxBitmap(16, 16), "test") );
+
+    // Calls a method of the item through the bus, as the panel does, and
+    // returns the error the call failed with, or an empty string.
+    const auto call = [conn](const char* method, GVariant* args)
+    {
+        struct Result
+        {
+            bool done = false;
+            wxString error;
+        } result;
+
+        g_dbus_connection_call(
+            conn, g_dbus_connection_get_unique_name(conn),
+            "/StatusNotifierItem", "org.kde.StatusNotifierItem",
+            method, args, nullptr, G_DBUS_CALL_FLAGS_NONE, 5000, nullptr,
+            [](GObject* source, GAsyncResult* res, gpointer data)
+            {
+                Result* const r = static_cast<Result*>(data);
+
+                GError* error = nullptr;
+                GVariant* const reply = g_dbus_connection_call_finish(
+                    G_DBUS_CONNECTION(source), res, &error);
+                if ( reply )
+                    g_variant_unref(reply);
+                else
+                {
+                    r->error = wxString::FromUTF8(error->message);
+                    g_error_free(error);
+                }
+
+                r->done = true;
+            },
+            &result);
+
+        REQUIRE( WaitFor(method, [&result]() { return result.done; }, 5000) );
+
+        return result.error;
+    };
+
+    CHECK( call("ProvideXdgActivationToken",
+                g_variant_new("(s)", "wx-test-token")) == "" );
+
+    // The control: if this event does not arrive, nothing above reached the
+    // item, and the empty error proves nothing.
+    CHECK( call("Activate", g_variant_new("(ii)", 0, 0)) == "" );
+    CHECK( activated );
+
+#ifdef GDK_WINDOWING_WAYLAND
+    GdkDisplay* const display = gdk_display_get_default();
+    if ( GDK_IS_WAYLAND_DISPLAY(display) )
+    {
+        wxGCC_WARNING_SUPPRESS(deprecated-declarations)
+
+        CHECK( wxString::FromUTF8(
+                gdk_wayland_display_get_startup_notification_id(display))
+               == "wx-test-token" );
+
+        // A made-up token must not be left for the next window shown.
+        gdk_wayland_display_set_startup_notification_id(display, nullptr);
+
+        wxGCC_WARNING_RESTORE(deprecated-declarations)
+    }
+#endif // GDK_WINDOWING_WAYLAND
+
+    g_object_unref(conn);
+}
+
+#endif // wxUSE_TASKBARICON && __WXGTK4__

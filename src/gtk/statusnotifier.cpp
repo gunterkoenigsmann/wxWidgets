@@ -18,8 +18,10 @@
     #include "wx/utils.h"
 #endif
 
+#include "wx/gtk/private/backend.h"
 #include "wx/gtk/private/error.h"
 #include "wx/gtk/private/variant.h"
+#include "wx/gtk/private/wrapgdk.h"
 
 namespace
 {
@@ -58,6 +60,9 @@ const char* const ITEM_INTROSPECTION =
 "      <arg name='x' type='i' direction='in'/>"
 "      <arg name='y' type='i' direction='in'/>"
 "    </method>"
+"    <method name='ProvideXdgActivationToken'>"
+"      <arg name='token' type='s' direction='in'/>"
+"    </method>"
 "    <method name='Scroll'>"
 "      <arg name='delta' type='i' direction='in'/>"
 "      <arg name='orientation' type='s' direction='in'/>"
@@ -87,6 +92,35 @@ GDBusNodeInfo* GetItemNodeInfo()
     return s_info;
 }
 
+// Under Wayland a window may only take the focus from another application
+// with an xdg-activation token that the compositor handed to whoever the user
+// was interacting with. For a click on the icon that is the panel, which asks
+// for a token and passes it over with ProvideXdgActivationToken just before
+// it calls Activate, SecondaryActivate or ContextMenu, or a menu item's Event.
+//
+// Which window, if any, the application will then raise is not known here, so
+// the token is given to the display rather than to a toplevel: GDK uses the
+// display's token for the next window that is shown or presented, and then
+// forgets it. GtkApplication does the same with a token it receives over
+// D-Bus, and for the same reason: the replacement of this deprecated function,
+// gdk_toplevel_set_startup_id(), needs the window up front.
+void UseActivationToken(const char* token)
+{
+#ifdef GDK_WINDOWING_WAYLAND
+    GdkDisplay* const display = gdk_display_get_default();
+    if ( !display || !wxGTKImpl::IsWayland(display) || !*token )
+        return;
+
+    wxLogTrace(TRACE_SNI, "activation token \"%s\"", token);
+
+    wxGCC_WARNING_SUPPRESS(deprecated-declarations)
+    gdk_wayland_display_set_startup_notification_id(display, token);
+    wxGCC_WARNING_RESTORE(deprecated-declarations)
+#else
+    wxUnusedVar(token);
+#endif
+}
+
 } // anonymous namespace
 
 // The vtable cannot take member functions, so it is a friend that forwards.
@@ -97,7 +131,7 @@ struct wxStatusNotifierItemVTable
                            const gchar*,
                            const gchar*,
                            const gchar* method,
-                           GVariant*,
+                           GVariant* parameters,
                            GDBusMethodInvocation* invocation,
                            gpointer userData)
     {
@@ -106,7 +140,13 @@ struct wxStatusNotifierItemVTable
 
         wxLogTrace(TRACE_SNI, "item method %s", method);
 
-        if ( self->m_handler )
+        if ( strcmp(method, "ProvideXdgActivationToken") == 0 )
+        {
+            const char* token = nullptr;
+            g_variant_get(parameters, "(&s)", &token);
+            UseActivationToken(token);
+        }
+        else if ( self->m_handler )
         {
             if ( strcmp(method, "Activate") == 0 )
                 self->m_handler->OnActivate();
