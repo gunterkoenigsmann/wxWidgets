@@ -326,4 +326,190 @@ TEST_CASE("wxTaskBarIcon::ActivationToken", "[taskbaricon][gtk]")
     g_object_unref(conn);
 }
 
+namespace
+{
+
+// Calls a method on an object this process exports, through the session bus,
+// as a panel would. Returns the reply, which the caller unrefs, or null with
+// the error message in the given string.
+GVariant* CallOwnObject(GDBusConnection* conn,
+                        const char* path,
+                        const char* iface,
+                        const char* method,
+                        GVariant* args,
+                        wxString& error)
+{
+    struct Result
+    {
+        bool done = false;
+        GVariant* reply = nullptr;
+        wxString error;
+    } result;
+
+    g_dbus_connection_call(
+        conn, g_dbus_connection_get_unique_name(conn),
+        path, iface, method, args, nullptr, G_DBUS_CALL_FLAGS_NONE, 5000,
+        nullptr,
+        [](GObject* source, GAsyncResult* res, gpointer data)
+        {
+            Result* const r = static_cast<Result*>(data);
+
+            GError* err = nullptr;
+            r->reply = g_dbus_connection_call_finish(
+                G_DBUS_CONNECTION(source), res, &err);
+            if ( !r->reply )
+            {
+                r->error = wxString::FromUTF8(err->message);
+                g_error_free(err);
+            }
+
+            r->done = true;
+        },
+        &result);
+
+    if ( !WaitFor(method, [&result]() { return result.done; }, 5000) )
+        error = "timed out";
+    else
+        error = result.error;
+
+    return result.reply;
+}
+
+// The labels of the top level items in a com.canonical.dbusmenu layout, as
+// GetLayout returns it.
+wxArrayString GetLayoutLabels(GVariant* reply)
+{
+    wxArrayString labels;
+
+    guint32 revision = 0;
+    gint32 id = 0;
+    GVariant* props = nullptr;
+    GVariantIter* children = nullptr;
+    g_variant_get(reply, "(u(i@a{sv}av))", &revision, &id, &props, &children);
+    g_variant_unref(props);
+
+    GVariant* child;
+    while ( g_variant_iter_next(children, "v", &child) )
+    {
+        GVariant* childProps = nullptr;
+        g_variant_get(child, "(i@a{sv}av)", &id, &childProps, nullptr);
+
+        const char* label = "";
+        g_variant_lookup(childProps, "label", "&s", &label);
+        labels.push_back(wxString::FromUTF8(label));
+
+        g_variant_unref(childProps);
+        g_variant_unref(child);
+    }
+
+    g_variant_iter_free(children);
+
+    return labels;
+}
+
+} // anonymous namespace
+
+// The panel draws the menu from another process, and may ask about it or
+// report a click on it at any time, including after the wxMenu given to
+// PopupMenu() -- typically one on the stack -- is gone. Each request must
+// read the menu as it is then, and a click must do what a click on a menu of
+// our own does.
+TEST_CASE("wxTaskBarIcon::MenuOverDBus", "[taskbaricon][gtk]")
+{
+    GDBusConnection* const conn =
+        g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if ( !conn )
+    {
+        WARN("Skipping the test: no D-Bus session bus.");
+        return;
+    }
+
+    wxTaskBarIcon icon;
+    REQUIRE( icon.SetIcon(wxBitmap(16, 16), "test") );
+
+    int lastId = wxID_NONE;
+    int lastInt = -1;
+    int clicks = 0;
+    icon.Bind(wxEVT_MENU, [&](wxCommandEvent& event)
+    {
+        lastId = event.GetId();
+        lastInt = event.GetInt();
+        clicks++;
+    });
+
+    const auto call = [conn](const char* method, GVariant* args,
+                             wxString& error)
+    {
+        return CallOwnObject(conn, "/MenuBar", "com.canonical.dbusmenu",
+                             method, args, error);
+    };
+
+    const auto getLayout = [&call]()
+    {
+        wxString error;
+        GVariant* const reply = call("GetLayout",
+                                     g_variant_new("(ii@as)", 0, -1,
+                                                   g_variant_new_strv(
+                                                       nullptr, 0)),
+                                     error);
+        INFO("GetLayout: " << error);
+        REQUIRE( reply );
+
+        const wxArrayString labels = GetLayoutLabels(reply);
+        g_variant_unref(reply);
+        return labels;
+    };
+
+    const auto click = [&call](gint32 id)
+    {
+        wxString error;
+        GVariant* const reply = call("Event",
+                                     g_variant_new("(isvu)", id, "clicked",
+                                                   g_variant_new_int32(0), 0),
+                                     error);
+        if ( reply )
+            g_variant_unref(reply);
+        return error;
+    };
+
+    {
+        wxMenu menu;
+        menu.Append(1001, "&Open\tCtrl+O");
+        wxMenuItem* const check = menu.AppendCheckItem(1002, "Check");
+
+        REQUIRE( icon.PopupMenu(&menu) );
+
+        const wxArrayString labels = getLayout();
+        REQUIRE( labels.size() == 2 );
+        CHECK( labels[0] == "_Open" );
+        CHECK( labels[1] == "Check" );
+
+        // Ids are positions in the walk, starting at 1. The control: this
+        // click must arrive, or the ones below prove nothing.
+        CHECK( click(1) == "" );
+        CHECK( WaitFor("menu event", [&clicks]() { return clicks == 1; }) );
+        CHECK( lastId == 1001 );
+
+        CHECK( click(2) == "" );
+        CHECK( WaitFor("menu event", [&clicks]() { return clicks == 2; }) );
+        CHECK( lastId == 1002 );
+        CHECK( lastInt == 1 );
+        CHECK( check->IsChecked() );
+
+        // Changing the menu after it was given must not leave the panel
+        // with ids for items that are gone.
+        menu.Destroy(1001);
+        CHECK( getLayout().size() == 1 );
+    }
+
+    // The menu is gone now. Reading it and clicking an id from it must not
+    // reach the freed items.
+    CHECK( getLayout().empty() );
+    CHECK( click(1) != "" );
+    YieldForAWhile();
+    CHECK( clicks == 2 );
+
+    g_object_unref(conn);
+}
+
 #endif // wxUSE_TASKBARICON && __WXGTK4__

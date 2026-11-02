@@ -647,14 +647,22 @@ public:
     {
         // The panel drew the menu, so nothing here has been through
         // wxMenu's own event code: turn the choice into the command event
-        // the application would have got from a menu of its own.
+        // the application would have got from a menu of its own. That
+        // includes the item changing state first, as a click on a native
+        // menu's check or radio item does before wx hears about it.
+        if ( item->IsCheckable() )
+            item->Check(item->GetKind() == wxITEM_RADIO || !item->IsChecked());
+
         wxCommandEvent event(wxEVT_MENU, item->GetId());
         event.SetEventObject(m_taskBarIcon);
 
         if ( item->IsCheckable() )
             event.SetInt(item->IsChecked() ? 1 : 0);
 
-        m_taskBarIcon->SafelyProcessEvent(event);
+        // Queued rather than processed here: this is called while answering
+        // the panel's D-Bus call, and a handler is free to change the menu or
+        // remove the icon, which destroys the object answering it.
+        m_taskBarIcon->QueueEvent(event.Clone());
     }
 
 private:
