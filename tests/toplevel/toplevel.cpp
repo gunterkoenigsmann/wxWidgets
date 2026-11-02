@@ -512,4 +512,84 @@ TEST_CASE("wxTaskBarIcon::MenuOverDBus", "[taskbaricon][gtk]")
     g_object_unref(conn);
 }
 
+// Removing the icon while its registration with the panel is still waiting
+// for an answer must not leave the answer to arrive at a freed item. A
+// stand-in watcher answers here, so that the answer is a success: only that
+// one used to be written to the item. Only an address sanitizer build or
+// valgrind sees a write to freed memory; others at least run the code path.
+TEST_CASE("wxTaskBarIcon::RemoveWhileRegistering", "[taskbaricon][gtk]")
+{
+    GDBusConnection* const conn =
+        g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, nullptr);
+    if ( !conn )
+    {
+        WARN("Skipping the test: no D-Bus session bus.");
+        return;
+    }
+
+    GDBusNodeInfo* const node = g_dbus_node_info_new_for_xml(
+        "<node>"
+        "  <interface name='org.kde.StatusNotifierWatcher'>"
+        "    <method name='RegisterStatusNotifierItem'>"
+        "      <arg name='service' type='s' direction='in'/>"
+        "    </method>"
+        "  </interface>"
+        "</node>", nullptr);
+    REQUIRE( node );
+
+    int registrations = 0;
+
+    static const GDBusInterfaceVTable vtable =
+    {
+        [](GDBusConnection*, const gchar*, const gchar*, const gchar*,
+           const gchar*, GVariant*, GDBusMethodInvocation* invocation,
+           gpointer data)
+        {
+            ++*static_cast<int*>(data);
+            g_dbus_method_invocation_return_value(invocation, nullptr);
+        },
+        nullptr, nullptr, { nullptr }
+    };
+
+    const guint objectId = g_dbus_connection_register_object(
+        conn, "/StatusNotifierWatcher", node->interfaces[0], &vtable,
+        &registrations, nullptr, nullptr);
+    REQUIRE( objectId );
+
+    bool owned = false;
+    const guint ownerId = g_bus_own_name_on_connection(
+        conn, "org.kde.StatusNotifierWatcher", G_BUS_NAME_OWNER_FLAGS_NONE,
+        [](GDBusConnection*, const gchar*, gpointer data)
+        {
+            *static_cast<bool*>(data) = true;
+        },
+        nullptr, &owned, nullptr);
+
+    if ( WaitFor("watcher name", [&owned]() { return owned; }, 5000) )
+    {
+        for ( int n = 0; n < 5; n++ )
+        {
+            wxTaskBarIcon icon;
+            CHECK( icon.SetIcon(wxBitmap(16, 16), "test") );
+            CHECK( icon.RemoveIcon() );
+        }
+
+        // Let the answers arrive.
+        YieldForAWhile(300);
+
+        // The control: the watcher was really asked, so there were answers
+        // on their way when the items went.
+        CHECK( registrations > 0 );
+    }
+    else
+    {
+        WARN("Skipping the test: another watcher owns the name.");
+    }
+
+    g_bus_unown_name(ownerId);
+    g_dbus_connection_unregister_object(conn, objectId);
+    g_dbus_node_info_unref(node);
+    g_object_unref(conn);
+}
+
 #endif // wxUSE_TASKBARICON && __WXGTK4__
