@@ -89,14 +89,58 @@ void GetDataObjectFormats(wxDataObject* data,
         formats.push_back(all[i]);
 }
 
-// State shared with the async callbacks for the duration of one read.
+// How long a read may take before it is given up on. The other side is
+// another application, which may be hung or may never answer at all; while we
+// wait, nothing else in this one can be used. Generous, as a large image from
+// a slow application is a legitimate reason to take a while.
+const guint CLIPBOARD_READ_TIMEOUT_MS = 5000;
+
+// State shared with the async callbacks of one read.
+//
+// Allocated on the heap because it can outlive ReadFormatSync(): when a read
+// times out, the operation in progress is cancelled, but not every stream
+// honours that promptly -- GDK's in-process pipe, used when the clipboard is
+// our own, ignores it entirely -- so ReadFormatSync() returns without waiting
+// for the callbacks, and the last of them frees this instead.
 struct ClipboardRead
 {
-    GMainLoop* loop = nullptr;
+    ~ClipboardRead()
+    {
+        g_main_loop_unref(loop);
+        g_object_unref(cancellable);
+        if ( out )
+            g_object_unref(out);
+        if ( bytes )
+            g_bytes_unref(bytes);
+    }
+
+    GMainLoop* loop = g_main_loop_new(nullptr, FALSE);
+    GCancellable* cancellable = g_cancellable_new();
     GOutputStream* out = nullptr;
     GBytes* bytes = nullptr;
+
+    // Set by whichever callback ends the read.
     bool finished = false;
+
+    // Set by ReadFormatSync() when it gave up waiting.
+    bool abandoned = false;
 };
+
+// Called exactly once per read, by the callback that ends it.
+void FinishRead(ClipboardRead* read, GBytes* bytes)
+{
+    if ( read->abandoned )
+    {
+        if ( bytes )
+            g_bytes_unref(bytes);
+        delete read;
+        return;
+    }
+
+    read->bytes = bytes;
+    read->finished = true;
+    g_main_loop_quit(read->loop);
+}
 
 extern "C" {
 
@@ -104,14 +148,14 @@ void wx_clipboard_spliced(GObject* src, GAsyncResult* res, gpointer user_data)
 {
     ClipboardRead* const read = static_cast<ClipboardRead*>(user_data);
 
+    GBytes* bytes = nullptr;
     if ( g_output_stream_splice_finish(G_OUTPUT_STREAM(src), res, nullptr) >= 0 )
     {
-        read->bytes = g_memory_output_stream_steal_as_bytes(
-                        G_MEMORY_OUTPUT_STREAM(src));
+        bytes = g_memory_output_stream_steal_as_bytes(
+                    G_MEMORY_OUTPUT_STREAM(src));
     }
 
-    read->finished = true;
-    g_main_loop_quit(read->loop);
+    FinishRead(read, bytes);
 }
 
 void wx_clipboard_read_done(GObject* src, GAsyncResult* res, gpointer user_data)
@@ -131,8 +175,7 @@ void wx_clipboard_read_done(GObject* src, GAsyncResult* res, gpointer user_data)
             g_error_free(error);
         }
 
-        read->finished = true;
-        g_main_loop_quit(read->loop);
+        FinishRead(read, nullptr);
         return;
     }
 
@@ -142,34 +185,64 @@ void wx_clipboard_read_done(GObject* src, GAsyncResult* res, gpointer user_data)
                                  GOutputStreamSpliceFlags(
                                     G_OUTPUT_STREAM_SPLICE_CLOSE_SOURCE |
                                     G_OUTPUT_STREAM_SPLICE_CLOSE_TARGET),
-                                 G_PRIORITY_DEFAULT, nullptr,
+                                 G_PRIORITY_DEFAULT, read->cancellable,
                                  wx_clipboard_spliced, read);
     g_object_unref(stream);
+}
+
+gboolean wx_clipboard_read_timeout(gpointer user_data)
+{
+    ClipboardRead* const read = static_cast<ClipboardRead*>(user_data);
+
+    wxLogTrace(TRACE_CLIPBOARD, "clipboard read timed out");
+    g_cancellable_cancel(read->cancellable);
+    g_main_loop_quit(read->loop);
+
+    return G_SOURCE_REMOVE;
 }
 
 } // extern "C"
 
 // Read one format off the clipboard, blocking until it is available. Returns
-// null if the clipboard doesn't have it, or if reading it failed.
+// null if the clipboard doesn't have it, if reading it failed, or if the other
+// side did not deliver it within CLIPBOARD_READ_TIMEOUT_MS.
 GBytes* ReadFormatSync(GdkClipboard* clipboard, const char* mime)
 {
     const char* mimes[2] = { mime, nullptr };
 
-    ClipboardRead read;
-    read.loop = g_main_loop_new(nullptr, FALSE);
+    ClipboardRead* const read = new ClipboardRead;
 
-    gdk_clipboard_read_async(clipboard, mimes, G_PRIORITY_DEFAULT, nullptr,
-                             wx_clipboard_read_done, &read);
+    // The loop below runs every source on the main context, not only the
+    // clipboard's: GTK 4 offers no way to dispatch some events and hold back
+    // others. Disabling the windows, as a modal dialog does, keeps the user's
+    // input from reaching the application in the middle of GetData().
+    wxWindowDisabler disableAll;
 
-    // The callbacks always quit the loop, on the failure path too, so this
-    // can't be entered without a way out.
-    g_main_loop_run(read.loop);
-    g_main_loop_unref(read.loop);
+    gdk_clipboard_read_async(clipboard, mimes, G_PRIORITY_DEFAULT,
+                             read->cancellable, wx_clipboard_read_done, read);
 
-    if ( read.out )
-        g_object_unref(read.out);
+    const guint timeoutId = g_timeout_add(CLIPBOARD_READ_TIMEOUT_MS,
+                                          wx_clipboard_read_timeout, read);
 
-    return read.bytes;
+    // Left either by the callback ending the read or by the timeout.
+    g_main_loop_run(read->loop);
+
+    if ( !read->finished )
+    {
+        // The timeout has fired and removed itself; the callbacks still to
+        // come free the state.
+        read->abandoned = true;
+        return nullptr;
+    }
+
+    if ( !g_cancellable_is_cancelled(read->cancellable) )
+        g_source_remove(timeoutId);
+
+    GBytes* const bytes = read->bytes;
+    read->bytes = nullptr;
+    delete read;
+
+    return bytes;
 }
 
 } // anonymous namespace
