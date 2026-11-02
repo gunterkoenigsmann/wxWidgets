@@ -32,6 +32,8 @@
 #include "wx/scopedarray.h"
 #include "wx/scopeguard.h"
 #include "wx/evtloop.h"
+#include "wx/eventfilter.h"
+#include "wx/thread.h"
 
 #include "wx/gtk/private.h"
 #include "wx/gtk/private/backend.h"
@@ -203,6 +205,27 @@ gboolean wx_clipboard_read_timeout(gpointer user_data)
 
 } // extern "C"
 
+// Swallows mouse, keyboard and command events while it exists, so that what
+// the user does during a read reaches neither wx handlers nor, for the events
+// whose native handling wx decides, the native widgets.
+class UserInputBlocker : public wxEventFilter
+{
+public:
+    UserInputBlocker() { wxEvtHandler::AddFilter(this); }
+    ~UserInputBlocker() { wxEvtHandler::RemoveFilter(this); }
+
+    virtual int FilterEvent(wxEvent& event) override
+    {
+        if ( event.GetEventCategory() == wxEVT_CATEGORY_USER_INPUT &&
+                wxThread::IsMain() )
+            return Event_Processed;
+
+        return Event_Skip;
+    }
+
+    wxDECLARE_NO_COPY_CLASS(UserInputBlocker);
+};
+
 // Read one format off the clipboard, blocking until it is available. Returns
 // null if the clipboard doesn't have it, if reading it failed, or if the other
 // side did not deliver it within CLIPBOARD_READ_TIMEOUT_MS.
@@ -214,9 +237,10 @@ GBytes* ReadFormatSync(GdkClipboard* clipboard, const char* mime)
 
     // The loop below runs every source on the main context, not only the
     // clipboard's: GTK 4 offers no way to dispatch some events and hold back
-    // others, which is also why wxYield() under GTK 4 cannot. Disabling the
-    // windows would hold back the user's input, but it changes the state of
-    // the very control a Paste() is reading for, so this waits like a yield.
+    // others. So the user's input is dispatched, and dropped once it becomes
+    // a wx event. Disabling the windows instead would change the state of the
+    // very control a Paste() is reading for.
+    UserInputBlocker blockInput;
 
     gdk_clipboard_read_async(clipboard, mimes, G_PRIORITY_DEFAULT,
                              read->cancellable, wx_clipboard_read_done, read);
