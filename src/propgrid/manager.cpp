@@ -1376,6 +1376,7 @@ bool wxPropertyGridManager::RemovePage( int page )
             m_pToolbar->DeleteToolByPos(2);
 
         m_pToolbar->DeleteToolByPos(toolPos);
+        RecalculatePositions(m_width, m_height);
     }
 #endif
 
