@@ -214,9 +214,9 @@ GBytes* ReadFormatSync(GdkClipboard* clipboard, const char* mime)
 
     // The loop below runs every source on the main context, not only the
     // clipboard's: GTK 4 offers no way to dispatch some events and hold back
-    // others. Disabling the windows, as a modal dialog does, keeps the user's
-    // input from reaching the application in the middle of GetData().
-    wxWindowDisabler disableAll;
+    // others, which is also why wxYield() under GTK 4 cannot. Disabling the
+    // windows would hold back the user's input, but it changes the state of
+    // the very control a Paste() is reading for, so this waits like a yield.
 
     gdk_clipboard_read_async(clipboard, mimes, G_PRIORITY_DEFAULT,
                              read->cancellable, wx_clipboard_read_done, read);
