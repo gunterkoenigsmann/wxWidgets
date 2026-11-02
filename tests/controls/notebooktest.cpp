@@ -318,4 +318,51 @@ TEST_CASE_METHOD(NotebookTestCase, "Notebook::HitTestFlags", "[notebook]")
 #endif // ports
 }
 
+#ifdef __WXGTK4__
+
+#include "wx/gtk/private/wrapgtk.h"
+#include "waitfor.h"
+
+// Under GTK 4 a vetoed page change is undone from an idle callback, and the
+// handler that vetoed it may destroy the notebook before that runs. The page
+// is switched through GTK, as a click on a tab does.
+TEST_CASE("wxNotebook::DestroyedAfterVeto", "[notebook][gtk]")
+{
+    const auto makeVetoingNotebook = []()
+    {
+        wxNotebook* const nb =
+            new wxNotebook(wxTheApp->GetTopWindow(), wxID_ANY);
+        nb->AddPage(new wxPanel(nb), "First");
+        nb->AddPage(new wxPanel(nb), "Second");
+        nb->Bind(wxEVT_NOTEBOOK_PAGE_CHANGING,
+                 [](wxBookCtrlEvent& event) { event.Veto(); });
+        return nb;
+    };
+
+    // The control: left alone, the idle callback really does put the first
+    // page back, so the case below has one queued when it deletes.
+    {
+        std::unique_ptr<wxNotebook> nb(makeVetoingNotebook());
+        GtkNotebook* const widget = GTK_NOTEBOOK(nb->GetHandle());
+
+        gtk_notebook_set_current_page(widget, 1);
+        CHECK( gtk_notebook_get_current_page(widget) == 1 );
+
+        CHECK( WaitFor("vetoed page change undone", [widget]()
+               { return gtk_notebook_get_current_page(widget) == 0; }) );
+    }
+
+    // Destroyed before the idle callback runs. Only valgrind or an address
+    // sanitizer sees the freed notebook being read.
+    {
+        wxNotebook* const nb = makeVetoingNotebook();
+        gtk_notebook_set_current_page(GTK_NOTEBOOK(nb->GetHandle()), 1);
+        delete nb;
+
+        YieldForAWhile();
+    }
+}
+
+#endif // __WXGTK4__
+
 #endif //wxUSE_NOTEBOOK

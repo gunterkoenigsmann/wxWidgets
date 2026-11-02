@@ -13,6 +13,8 @@
 
 #include "wx/scrolbar.h"
 
+#include "wx/weakref.h"
+
 #ifndef WX_PRECOMP
     #include "wx/utils.h"
 #endif
@@ -73,9 +75,14 @@ extern "C" {
 // finished handling the event, so a handler is free to set the scroll position
 // from it. GTK4 has no such signal; an idle callback lands at the equivalent
 // point, after the current event's handling completes.
+//
+// The scrollbar may be destroyed before the idle callback runs, so it is
+// given a weak reference rather than the window itself.
 static gboolean wx_gtk_send_thumb_release(void* data)
 {
-    wxScrollBar* const win = static_cast<wxScrollBar*>(data);
+    wxScrollBar* const win = *static_cast<wxWeakRef<wxScrollBar>*>(data);
+    if ( !win || win->IsBeingDeleted() )
+        return G_SOURCE_REMOVE;
 
     const int value = win->GetThumbPosition();
     const int orient = win->HasFlag(wxSB_VERTICAL) ? wxVERTICAL : wxHORIZONTAL;
@@ -106,7 +113,12 @@ wx_gtk_scrollbar_released(GtkGestureClick*, int, double, double, wxScrollBar* wi
     if (win->m_isScrolling)
     {
         win->m_isScrolling = false;
-        g_idle_add(wx_gtk_send_thumb_release, win);
+        g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, wx_gtk_send_thumb_release,
+                        new wxWeakRef<wxScrollBar>(win),
+                        [](gpointer data)
+                        {
+                            delete static_cast<wxWeakRef<wxScrollBar>*>(data);
+                        });
     }
 }
 
