@@ -157,12 +157,17 @@ there are no later corrections to fold in, because each file appears once.
 
 ## What it is based on
 
-The series starts at `2f30400` (11 October), upstream master just after the
-3.3.4 release. The port branch was merged with it first, so this applies to
-master as it stands. Four files conflicted in that merge; the resolutions are
-in its commit message.
+The series starts at `73d90e3` (30 October), upstream master 161 commits
+after 3.3.4. The port branch was merged with it first (#278), so this applies
+to master as it stands. Four files conflicted in that merge; the resolutions
+are in its commit message. A fifth broke without conflicting: upstream's grid
+line colour calls a GTK+ 3 only style helper, and the GTK 4 build stopped.
 
-Step 1 was rebased by hand onto the new base, which it applied to unchanged.
+On 73d90e3, step 1 rebased by hand without conflicts and lost one commit, the
+wxPropertyGridManager relayout, which upstream now has. It is 26 commits.
+
+The cut before, on `2f30400` (11 October, just after 3.3.4):
+step 1 was rebased by hand onto that base, which it applied to unchanged.
 What changed is the port since the previous cut. One commit was rewritten,
 because the port no longer updates its menus from idle: GTK 4 menu bars now
 send wxEVT_MENU_OPEN, so what is left of the change is not to look for
@@ -178,9 +183,9 @@ gained the half of the AUI mouse capture fix that wxWidgets/wxWidgets#27025
 did not take. The first cut, on `0820518` (1 September), lost four files from
 step 1 the same way.
 
-This cut is on the fork as `upstream-series-3.3.4/*`, beside the previous
-one's `upstream-series-next/*`. `upstream-series/01-shared`
-is what wxWidgets/wxWidgets#26968 was opened from, so it is replaced only once
+This cut is on the fork as `upstream-series-73d90e3/*`, beside the
+previous ones' `upstream-series-3.3.4/*` and `upstream-series-next/*`.
+`upstream-series/01-shared` is what wxWidgets/wxWidgets#26968 was opened from, so it is replaced only once
 that is settled.
 
 ## What was verified
@@ -190,8 +195,8 @@ that is settled.
 | the split loses nothing | `git diff upstream-series/18-ci <port> -- . ':!docs' ':!CLAUDE.md' ':!.claude' ':!.github' ':!<the three scripts below>'` is **empty** |
 | step 1 keeps the existing build green | GTK+ 3, configured and built from a clean directory at that step: **rc=0** |
 | **every step after it builds too** | all 18 under GTK+ 3, `build/tools/build-upstream-series.sh`: **0 errors** each, and **0 warnings** in steps 17 and 18, the two whose logs the script keeps |
-| the series produces the port | the port's own CI on the tip this was cut from (`d5a33d5`, the head of #269): the GTK4 jobs, GTK+ 3, Qt 5.15 and 6.10, MSW and macOS all **green** |
-| the port passes on the new base | at the 3.3.4 merge (#263), from clean directories: GTK4 with `--enable-accessibility` **970 cases** and the wxAccessible bridge probe, GTK+ 3 **955 cases**, all passing |
+| the series produces the port | the port's own CI on the tip this was cut from (the head of #278): the GTK4 jobs, GTK+ 3, Qt 5.15 and 6.10, MSW and macOS all **green** |
+| the port passes on the new base | at the 73d90e3 merge (#278), from clean directories: GTK4 with `--enable-accessibility` **995 cases**, GTK+ 3 **972 cases**, all passing |
 | and under a toolkit with no GTK in it | step by step **not rechecked** for this cut: no Qt here. It last held for steps 1 to 16; the port's Qt jobs above are green |
 
 The row on every step replaces an argument that was wrong. It used to say
