@@ -110,22 +110,36 @@ is a property of the GTK in use.
   descendant; anything else refreshes one object.
 * Child ids become `wxGtkAccChild`, a `GObject` implementing `GtkAccessible`.
   Nothing is built until something first asks the widget for its accessible
-  children; at that point all of them are, back to front so each can be given
-  its successor. The vfuncs answer lazily as well, so a GTK that starts
-  honouring `get_next_accessible_sibling()` would get the cheaper behaviour for
-  free.
+  children; at that point all of them are, in two passes. The first makes
+  every object and pushes what it says about itself; the second gives each its
+  parent, back to front so each can be given its successor. The vfuncs answer
+  lazily as well, so a GTK that starts honouring `get_next_accessible_sibling()`
+  would get the cheaper behaviour for free.
+* GTK may walk the tree while it is being built. Since GTK 4.18, setting the
+  parent of an object realizes its AT-SPI context, and realizing it walks the
+  parent's children to find the new one's index -- which arrives back in the
+  code setting the parents. During the build the window reports no virtual
+  children, so the walk cannot start a second build from inside the first.
+  Without that, the build nests once per child; the crashes reported from
+  wxMaxima's configuration dialog on GTK 4.24 have their invalid writes inside
+  such a nested build.
 * A child id may be answered by the object it belongs to or by an object of its
   own -- wxGrid uses both, answering `GetChildCount()` from
   `wxGridAccessible` but handing out a `wxGridCellAccessible` for anything about
   a particular cell. That object is transient: wxGrid rebuilds it whenever a
   different cell is asked about. So it is looked up again for every question and
-  never stored.
+  never stored, and every question is asked before anything is pushed to GTK:
+  a push can make GTK walk the tree, and a walk can ask about another cell,
+  which deletes the object the earlier questions were going to.
 * `NotifyEvent()` uses `GetOrCreateAccessible()`, not `GetAccessible()`. A
   control that describes itself does so by overriding `CreateAccessible()`, and
   under wxMSW the platform asks for the result when an assistive technology
   sends `WM_GETOBJECT`. GTK4 has no equivalent -- its accessibility data has to
   already be there when something comes looking -- so the first event a control
-  reports is the moment the object gets built.
+  reports is the moment the object gets built. The exception is
+  `wxACC_EVENT_OBJECT_DESTROY`, which only releases what already exists:
+  wxGrid reports it from its destructor, after deleting its own `wxAccessible`,
+  and building a new one there would describe a half-destructed window.
 * `wxPizza` re-implements `GtkAccessible` so it can answer with those children.
   It is the widget behind every custom-drawn wx control, and nothing else can
   name an accessible child that is not a widget. When the window has no
@@ -235,6 +249,13 @@ and GTK headers, and `wx-config --cxxflags` does not name GTK's include paths:
 they are private to the library build. Both probes exit non-zero on failure, so
 they can be run from CI as they are, in a job configured with
 `--enable-accessibility`.
+
+`Window::AccessibleReentrantWalk` and `Window::AccessibleDestroyEvent` in
+`tests/controls/windowtest.cpp` cover the lifetime rules above: a
+`wxAccessible` that hands out transient child objects the way wxGrid does,
+and walks the GTK tree from inside its own answers, the way GTK 4.18 and later
+do from inside realizing a child. They need nothing but the GTK in use, so they
+run in `test_gui`.
 
 `samples/access` also builds and runs under wxGTK now. Its "Query" command used
 to walk the tree through MSAA's `IAccessible`; outside wxMSW it walks the

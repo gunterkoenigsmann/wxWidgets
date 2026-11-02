@@ -554,85 +554,94 @@ public:
         return count;
     }
 
-    // Make, or find, the object standing for childId.
+    // The object standing for childId, building all of them first if nothing
+    // has asked for them yet.
     wxGtkAccChild* GetChild(int childId)
     {
-        if ( childId < 1 )
-            return nullptr;
+        EnsureChildren();
 
-        const size_t index = size_t(childId - 1);
-        if ( m_children.size() <= index )
-            m_children.resize(index + 1, nullptr);
-
-        if ( !m_children[index] )
-        {
-            int askId;
-            wxAccRole role = wxROLE_NONE;
-            if ( QueryTarget(childId, &askId)->GetRole(askId, &role) != wxACC_OK )
-                role = wxROLE_NONE;
-
-            wxGtkAccChild* const child = WX_ACC_CHILD(
-                g_object_new(wx_acc_child_get_type(), nullptr));
-
-            child->m_accessible = m_acc;
-            child->m_impl = this;
-            child->m_childId = childId;
-            child->m_role = wxGTKAccessibleRole(role);
-
-            m_children[index] = child;
-
-            if ( GtkWidget* const widget = GetWidget() )
-            {
-                // The parent and the next sibling are given in one call
-                // because giving them separately, with
-                // gtk_accessible_update_next_accessible_sibling(), drops a
-                // reference on the parent widget -- see
-                // docs/gtk/probes/gtk4-a11y-virtual-child.c. The sibling is
-                // null because it is answered by a vfunc instead: siblings
-                // are made as the walk reaches them, not in advance.
-                gtk_accessible_set_accessible_parent(GTK_ACCESSIBLE(child),
-                                                     GTK_ACCESSIBLE(widget),
-                                                     nullptr);
-            }
-
-            UpdateChild(childId);
-        }
-
-        return m_children[index];
+        return FindChild(childId);
     }
 
-    // Build the whole sibling chain, back to front so that each child can be
-    // given its successor when its parent is set: the two-argument form of
-    // gtk_accessible_set_accessible_parent() is the only safe way to say what
-    // comes next -- see the comment in GetChild().
+    // The object standing for childId if it has been built, never building it.
+    wxGtkAccChild* FindChild(int childId) const
+    {
+        if ( childId < 1 || size_t(childId) > m_children.size() )
+            return nullptr;
+
+        return m_children[childId - 1];
+    }
+
+    // True while EnsureChildren() is running, during which the children are
+    // reported as not being there yet: see below.
+    bool IsBuildingChildren() const { return m_building; }
+
+    // Build the objects for all the child ids and chain them together.
     //
-    // Nothing is built until an assistive technology first walks the tree, but
-    // once it does, all of it is. That is GTK's requirement rather than a
-    // choice: see the note at the top of this file.
+    // Nothing is built until something first asks for a child, but then all
+    // of them are. That is GTK's requirement rather than a choice: see the
+    // note at the top of this file.
+    //
+    // GTK may walk the tree while this runs. Since GTK 4.18, setting the
+    // parent of an object realizes its AT-SPI context, and realizing it asks
+    // the parent for its children, to find the new one's index -- so the walk
+    // comes back here, from inside the loop below. While that happens the
+    // window answers as if it had no virtual children yet. Building them
+    // again from inside the walk would nest once per child, deep enough to
+    // run a large wxGrid out of stack, and each level would walk all of them
+    // again.
     void EnsureChildren()
     {
+        if ( m_building )
+            return;
+
         const int count = GetChildCount();
-        if ( count < 1 )
+        if ( count < 1 || count == m_linkedCount )
             return;
 
         GtkWidget* const widget = GetWidget();
         if ( !widget )
             return;
 
+        m_building = true;
+
+        if ( m_children.size() < size_t(count) )
+            m_children.resize(count, nullptr);
+
+        // The objects are made, and told everything about themselves, before
+        // any of them gets a parent: an object without one cannot be found,
+        // and its context is not realized, so nothing is announced and
+        // nothing comes back here.
+        for ( int childId = 1; childId <= count; childId++ )
+        {
+            if ( !m_children[childId - 1] )
+            {
+                m_children[childId - 1] = MakeChild(childId);
+                UpdateChild(childId);
+            }
+        }
+
+        // Back to front, so that each child can be given its successor when
+        // its parent is set. The two-argument form of
+        // gtk_accessible_set_accessible_parent() is the only safe way to say
+        // what comes next, because
+        // gtk_accessible_update_next_accessible_sibling() drops a reference
+        // on the parent widget -- see
+        // docs/gtk/probes/gtk4-a11y-virtual-child.c.
         for ( int childId = count; childId >= 1; childId-- )
         {
-            wxGtkAccChild* const child = GetChild(childId);
-            if ( !child )
-                continue;
-
-            wxGtkAccChild* const next = childId < count ? GetChild(childId + 1)
-                                                        : nullptr;
+            wxGtkAccChild* const next = childId < count
+                                            ? m_children[childId]
+                                            : nullptr;
 
             gtk_accessible_set_accessible_parent(
-                GTK_ACCESSIBLE(child),
+                GTK_ACCESSIBLE(m_children[childId - 1]),
                 GTK_ACCESSIBLE(widget),
                 next ? GTK_ACCESSIBLE(next) : nullptr);
         }
+
+        m_linkedCount = count;
+        m_building = false;
     }
 
     // Copy what the wxAccessible says about childId into GTK's cache.
@@ -641,33 +650,43 @@ public:
         if ( childId < 1 )
             return;
 
-        const size_t index = size_t(childId - 1);
-        if ( index >= m_children.size() || !m_children[index] )
+        wxGtkAccChild* const child = FindChild(childId);
+        if ( !child )
             return;
 
-        wxGtkAccChild* const child = m_children[index];
-
-        GtkAccessible* const accessible = GTK_ACCESSIBLE(child);
-
+        // Everything is asked before anything is pushed, and target is not
+        // used after that. Pushing a change can make GTK walk the tree, the
+        // walk can ask about other children, and wxGrid answers those with a
+        // new object that replaces -- and deletes -- the one asked here.
         int askId;
         wxAccessible* const target = QueryTarget(childId, &askId);
 
         wxString name;
-        wxGTKUpdateStringProperty(accessible, GTK_ACCESSIBLE_PROPERTY_LABEL,
-                                  target->GetName(askId, &name), name);
+        const wxAccStatus nameStatus = target->GetName(askId, &name);
 
         wxString description;
-        wxGTKUpdateStringProperty(accessible, GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
-                                  target->GetDescription(askId, &description),
-                                  description);
+        const wxAccStatus descriptionStatus =
+            target->GetDescription(askId, &description);
 
         wxString shortcut;
-        wxGTKUpdateStringProperty(accessible, GTK_ACCESSIBLE_PROPERTY_KEY_SHORTCUTS,
-                                  target->GetKeyboardShortcut(askId, &shortcut),
-                                  shortcut);
+        const wxAccStatus shortcutStatus =
+            target->GetKeyboardShortcut(askId, &shortcut);
 
         long state = 0;
-        if ( target->GetState(askId, &state) == wxACC_OK )
+        const bool hasState = target->GetState(askId, &state) == wxACC_OK;
+
+        GtkAccessible* const accessible = GTK_ACCESSIBLE(child);
+
+        wxGTKUpdateStringProperty(accessible,
+                                  GTK_ACCESSIBLE_PROPERTY_LABEL,
+                                  nameStatus, name);
+        wxGTKUpdateStringProperty(accessible,
+                                  GTK_ACCESSIBLE_PROPERTY_DESCRIPTION,
+                                  descriptionStatus, description);
+        wxGTKUpdateStringProperty(accessible,
+                                  GTK_ACCESSIBLE_PROPERTY_KEY_SHORTCUTS,
+                                  shortcutStatus, shortcut);
+        if ( hasState )
             wxGTKUpdateStates(accessible, state);
     }
 
@@ -724,7 +743,8 @@ public:
     // GTK4 has no way to say "this child now has the focus" -- focus is one of
     // the platform states, which are pulled and never pushed. The ARIA way to
     // say it for a composite widget is to point the widget at the item that
-    // currently stands in for it, which is what this does.
+    // currently stands in for it, which is what this does. The relation needs
+    // an object to point at, so this builds the children if nothing has yet.
     void UpdateFocus()
     {
         GtkWidget* const widget = GetWidget();
@@ -765,9 +785,8 @@ public:
     {
         UpdateSelf();
 
-        // Children are refreshed as they are visited rather than all at once:
-        // the ones that were never materialised have nothing to refresh, and
-        // the ones that were are few.
+        // Only the children that have been built: if none have, nothing has
+        // asked about them and there is nothing to refresh.
         for ( size_t n = 0; n < m_children.size(); n++ )
         {
             if ( m_children[n] )
@@ -779,9 +798,23 @@ public:
 
     void Detach()
     {
-        for ( size_t n = 0; n < m_children.size(); n++ )
+        // Taken out of m_children before any is released: releasing one can
+        // make GTK walk the tree, and the walk must not find the others.
+        wxVector<wxGtkAccChild*> children;
+        children.swap(m_children);
+        m_linkedCount = 0;
+
+        // Nor may the widget go on pointing at one of them.
+        if ( m_widget && !children.empty() )
         {
-            if ( wxGtkAccChild* const child = m_children[n] )
+            gtk_accessible_reset_relation(
+                GTK_ACCESSIBLE(m_widget),
+                GTK_ACCESSIBLE_RELATION_ACTIVE_DESCENDANT);
+        }
+
+        for ( wxGtkAccChild* const child : children )
+        {
+            if ( child )
             {
                 // GTK may still hold a reference to this: leave it able to
                 // answer, just with nothing to say.
@@ -790,12 +823,30 @@ public:
                 g_object_unref(child);
             }
         }
-        m_children.clear();
 
         ClearWidgetData();
     }
 
 private:
+    // A new object for childId, with the role it will keep, and no parent.
+    wxGtkAccChild* MakeChild(int childId)
+    {
+        int askId;
+        wxAccRole role = wxROLE_NONE;
+        if ( QueryTarget(childId, &askId)->GetRole(askId, &role) != wxACC_OK )
+            role = wxROLE_NONE;
+
+        wxGtkAccChild* const child = WX_ACC_CHILD(
+            g_object_new(wx_acc_child_get_type(), nullptr));
+
+        child->m_accessible = m_acc;
+        child->m_impl = this;
+        child->m_childId = childId;
+        child->m_role = wxGTKAccessibleRole(role);
+
+        return child;
+    }
+
     void ClearWidgetData()
     {
         if ( !m_widget )
@@ -811,6 +862,12 @@ private:
 
     wxAccessible* const m_acc;
     wxVector<wxGtkAccChild*> m_children;
+
+    // How many of m_children are chained together under the widget, or 0 if
+    // they have not been yet.
+    int m_linkedCount = 0;
+
+    bool m_building = false;
 
     // Weak: the widget can be destroyed while the wxAccessible is still alive.
     GtkWidget* m_widget = nullptr;
@@ -857,7 +914,7 @@ GtkAccessible* wxGTKPizzaGetFirstAccessibleChild(GtkWidget* widget)
 
     // No wxAccessible attached, or one that describes no children: the widget
     // keeps whatever accessible children GTK finds for it by itself.
-    if ( !impl || impl->GetChildCount() < 1 )
+    if ( !impl || impl->IsBuildingChildren() || impl->GetChildCount() < 1 )
         return nullptr;
 
     impl->EnsureChildren();
@@ -896,6 +953,17 @@ void wxAccessible::NotifyEvent(int eventType, wxWindow* window,
     if ( !window )
         return;
 
+    // Except when the window is going away: whatever describes it has nothing
+    // more to describe, and making one now would ask a window that is half
+    // destructed what it is -- wxGrid reports this from its destructor, after
+    // deleting its own wxAccessible.
+    if ( eventType == wxACC_EVENT_OBJECT_DESTROY )
+    {
+        if ( wxAccessible* const acc = window->GetAccessible() )
+            acc->m_impl->Detach();
+        return;
+    }
+
     // Not GetAccessible(): a control that describes itself does so by
     // overriding CreateAccessible(), and nothing under GTK4 asks for the
     // result. wxMSW gets that call from the platform, when an assistive
@@ -913,7 +981,7 @@ void wxAccessible::NotifyEvent(int eventType, wxWindow* window,
             break;
 
         case wxACC_EVENT_OBJECT_DESTROY:
-            acc->m_impl->Detach();
+            // Handled above, without creating anything.
             break;
 
         case wxACC_EVENT_OBJECT_CREATE:

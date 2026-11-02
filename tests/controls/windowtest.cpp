@@ -1784,3 +1784,335 @@ TEST_CASE("Window::AccessibleName", "[window][accessibility]")
 }
 
 #endif // __WXMSW__ && wxUSE_ACCESSIBILITY
+
+#if defined(__WXGTK4__) && wxUSE_ACCESSIBILITY
+
+// The tests below stand in for an assistive technology walking the GTK4
+// accessibility tree while wx is still answering questions about it. GTK 4.18
+// and later do exactly that on their own: setting the parent of a virtual
+// child realizes its AT-SPI context, and realizing it walks the parent's
+// children to find the new one's index. GTK 4.14 does not, so the walk is
+// started from inside the wxAccessible instead, which reaches the same code
+// at the same moment on any GTK.
+namespace
+{
+
+class ReentrantAccessible;
+
+// Counts what happened during one test, so that each check can name what it
+// is about.
+struct ReentrancyStats
+{
+    // Calls that reached a child object after its parent had replaced it.
+    int callsOnRetired = 0;
+
+    // How deeply walks started from inside a walk nested, at most.
+    int maxWalkDepth = 0;
+
+    int walkDepth = 0;
+};
+
+// The objects a wxGrid hands out for its cells: one at a time, replaced
+// whenever a different child is asked about. wxGridAccessible deletes the old
+// one; these are kept alive and marked instead, so that a call reaching one
+// can be counted rather than crash.
+class TransientChild : public wxAccessible
+{
+public:
+    TransientChild(wxWindow* win, ReentrantAccessible* parent, int childId)
+        : wxAccessible(win), m_parent(parent), m_childId(childId)
+    {
+    }
+
+    void Retire() { m_retired = true; }
+
+    wxAccStatus GetName(int childId, wxString* name) override;
+    wxAccStatus GetDescription(int childId, wxString* description) override;
+    wxAccStatus GetRole(int childId, wxAccRole* role) override;
+    wxAccStatus GetState(int childId, long* state) override;
+
+private:
+    void Called();
+
+    ReentrantAccessible* const m_parent;
+    const int m_childId;
+    bool m_retired = false;
+};
+
+class ReentrantAccessible : public wxAccessible
+{
+public:
+    enum { CHILD_COUNT = 8 };
+
+    ReentrantAccessible(wxWindow* win, ReentrancyStats& stats)
+        : wxAccessible(win), m_stats(stats)
+    {
+    }
+
+    ~ReentrantAccessible()
+    {
+        for ( auto* child : m_graveyard )
+            delete child;
+        delete m_current;
+    }
+
+    ReentrancyStats& GetStats() { return m_stats; }
+
+    // Walk the accessible children of the window as GTK would, and return
+    // the labels found, in order.
+    wxVector<wxString> Walk()
+    {
+        wxVector<wxString> labels;
+
+        m_stats.walkDepth++;
+        if ( m_stats.walkDepth > m_stats.maxWalkDepth )
+            m_stats.maxWalkDepth = m_stats.walkDepth;
+
+        GtkAccessible* const widget =
+            GTK_ACCESSIBLE(GetWindow()->GetConnectWidget());
+        for ( GtkAccessible* child =
+                gtk_accessible_get_first_accessible_child(widget);
+              child; )
+        {
+            labels.push_back(G_OBJECT_TYPE_NAME(child));
+
+            GtkAccessible* const next =
+                gtk_accessible_get_next_accessible_sibling(child);
+            g_object_unref(child);
+            child = next;
+        }
+
+        m_stats.walkDepth--;
+
+        return labels;
+    }
+
+    // Set to walk the tree from inside the answers, as GTK 4.18 does.
+    bool m_walkWhenAsked = false;
+
+    wxAccStatus GetChildCount(int* childCount) override
+    {
+        *childCount = CHILD_COUNT;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetChild(int childId, wxAccessible** child) override
+    {
+        if ( childId == wxACC_SELF )
+        {
+            *child = this;
+            return wxACC_OK;
+        }
+
+        if ( !m_current || m_currentId != childId )
+        {
+            if ( m_current )
+            {
+                m_current->Retire();
+                m_graveyard.push_back(m_current);
+            }
+
+            m_current = new TransientChild(GetWindow(), this, childId);
+            m_currentId = childId;
+        }
+
+        *child = m_current;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetRole(int childId, wxAccRole* role) override
+    {
+        *role = childId == wxACC_SELF ? wxROLE_SYSTEM_TABLE
+                                      : wxROLE_SYSTEM_CELL;
+        return wxACC_OK;
+    }
+
+    wxAccStatus GetFocus(int* childId, wxAccessible** child) override
+    {
+        *childId = m_focus;
+        *child = nullptr;
+        return wxACC_OK;
+    }
+
+    int m_focus = 0;
+
+private:
+    ReentrancyStats& m_stats;
+
+    TransientChild* m_current = nullptr;
+    int m_currentId = 0;
+    wxVector<TransientChild*> m_graveyard;
+};
+
+void TransientChild::Called()
+{
+    if ( m_retired )
+        m_parent->GetStats().callsOnRetired++;
+}
+
+wxAccStatus TransientChild::GetName(int WXUNUSED(childId), wxString* name)
+{
+    Called();
+
+    // Build the name before walking: the walk may replace this object, and
+    // the point of the test is what wx does with it afterwards.
+    *name = wxString::Format("child %d", m_childId);
+
+    if ( m_parent->m_walkWhenAsked )
+        m_parent->Walk();
+
+    return wxACC_OK;
+}
+
+wxAccStatus TransientChild::GetDescription(int WXUNUSED(childId),
+                                           wxString* description)
+{
+    Called();
+    *description = wxString::Format("description %d", m_childId);
+    return wxACC_OK;
+}
+
+wxAccStatus TransientChild::GetRole(int WXUNUSED(childId), wxAccRole* role)
+{
+    Called();
+    *role = wxROLE_SYSTEM_CELL;
+    return wxACC_OK;
+}
+
+wxAccStatus TransientChild::GetState(int WXUNUSED(childId), long* state)
+{
+    Called();
+    *state = wxACC_STATE_SYSTEM_SELECTABLE;
+    return wxACC_OK;
+}
+
+// Read a child's label back out of GTK's cache.
+bool HasLabel(GtkAccessible* accessible, const char* label)
+{
+    char* const message = gtk_test_accessible_check_property(
+        accessible, GTK_ACCESSIBLE_PROPERTY_LABEL, label);
+    const bool ok = message == nullptr;
+    g_free(message);
+    return ok;
+}
+
+} // anonymous namespace
+
+TEST_CASE("Window::AccessibleReentrantWalk", "[window][accessibility]")
+{
+    auto win = make_unique<wxWindow>(wxTheApp->GetTopWindow(), wxID_ANY);
+
+    ReentrancyStats stats;
+    auto* const acc = new ReentrantAccessible(win.get(), stats);
+    win->SetAccessible(acc);
+
+    // Hand the window's own description to GTK, which is also what connects
+    // the wxAccessible to the widget. wxGrid gets this from the creation
+    // event it reports.
+    acc->Update();
+
+    acc->m_walkWhenAsked = true;
+
+    SECTION("Walk")
+    {
+        // The first walk builds the children, and every child answers its
+        // questions by walking again.
+        acc->Walk();
+    }
+
+    SECTION("Focus")
+    {
+        // Moving the focus to a child before anything has walked builds that
+        // child first, alone -- which is what a click in a wxGrid does.
+        acc->m_focus = 3;
+        wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_FOCUS, win.get(),
+                                  wxOBJID_CLIENT, 3);
+    }
+
+    SECTION("Selection")
+    {
+        acc->Walk();
+
+        // Once built, a selection change refreshes every child.
+        acc->m_focus = 2;
+        wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_SELECTIONWITHIN,
+                                  win.get(), wxOBJID_CLIENT, wxACC_SELF);
+    }
+
+    acc->m_walkWhenAsked = false;
+
+    // The control: the walk has to have happened at all, and reached every
+    // child, or the checks below would pass for a tree nobody looked at.
+    REQUIRE( stats.maxWalkDepth >= 1 );
+
+    const wxVector<wxString> types = acc->Walk();
+    REQUIRE( types.size() == size_t(ReentrantAccessible::CHILD_COUNT) );
+    for ( const wxString& type : types )
+        CHECK( type == "wxGtkAccChild" );
+
+    // And the children carry what they were asked for, so the answers that
+    // were given while the tree was being walked arrived where they belong.
+    GtkAccessible* child = gtk_accessible_get_first_accessible_child(
+        GTK_ACCESSIBLE(win->GetConnectWidget()));
+    for ( int n = 1; child; n++ )
+    {
+        INFO("child " << n);
+        CHECK( HasLabel(child, wxString::Format("child %d", n).utf8_str()) );
+
+        GtkAccessible* const next =
+            gtk_accessible_get_next_accessible_sibling(child);
+        g_object_unref(child);
+        child = next;
+    }
+
+    // wxGrid deletes the object it replaces, so a call reaching one is a
+    // use after free there.
+    CHECK( stats.callsOnRetired == 0 );
+
+    // Building the children must not be started again from inside building
+    // them: with one level of nesting per child, a large wxGrid runs out of
+    // stack, and each level walks the whole tree again.
+    CHECK( stats.maxWalkDepth <= 2 );
+}
+
+TEST_CASE("Window::AccessibleDestroyEvent", "[window][accessibility]")
+{
+    // A window being destroyed is reported to the accessibility layer, and
+    // that report must not give it a wxAccessible it did not have: under
+    // wxGrid's destructor that made a second, half-destructed one.
+    class DescribedWindow : public wxWindow
+    {
+    public:
+        explicit DescribedWindow(wxWindow* parent)
+            : wxWindow(parent, wxID_ANY)
+        {
+        }
+
+        int m_created = 0;
+
+    protected:
+        wxAccessible* CreateAccessible() override
+        {
+            m_created++;
+            return new wxAccessible(this);
+        }
+    };
+
+    auto win = make_unique<DescribedWindow>(wxTheApp->GetTopWindow());
+
+    wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_DESTROY, win.get(),
+                              wxOBJID_CLIENT, wxACC_SELF);
+
+    CHECK( win->m_created == 0 );
+    CHECK( win->GetAccessible() == nullptr );
+
+    // The control: any other event does create it, so the window above
+    // really was one that would have been given an accessible.
+    wxAccessible::NotifyEvent(wxACC_EVENT_OBJECT_NAMECHANGE, win.get(),
+                              wxOBJID_CLIENT, wxACC_SELF);
+
+    CHECK( win->m_created == 1 );
+    CHECK( win->GetAccessible() != nullptr );
+}
+
+#endif // __WXGTK4__ && wxUSE_ACCESSIBILITY
