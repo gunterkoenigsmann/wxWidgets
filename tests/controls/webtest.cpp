@@ -96,7 +96,7 @@ protected:
 
 TEST_CASE_METHOD(WebViewTestCase, "WebView", "[wxWebView]")
 {
-#if defined(__WXGTK__) && !defined(__WXGTK3__)
+#if defined(__WXGTK__) && !defined(__WXGTK3__) && !defined(__WXGTK4__)
     wxString value;
     if ( !wxGetEnv("wxTEST_WEBVIEW_GTK2", &value) || value != "1" )
     {

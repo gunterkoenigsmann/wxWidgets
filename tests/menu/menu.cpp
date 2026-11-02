@@ -19,11 +19,18 @@
     #include "wx/wx.h"
 #endif // WX_PRECOMP
 
+#include "wx/combobox.h"
 #include "wx/menu.h"
+#include "wx/spinctrl.h"
+#include "wx/srchctrl.h"
 #include "wx/translation.h"
 #include "wx/uiaction.h"
 
 #include "waitfor.h"
+
+#ifdef __WXGTK4__
+    #include <gtk/gtk.h>
+#endif
 
 #include <stdarg.h>
 
@@ -88,6 +95,7 @@ public:
 
 protected:
     void CreateFrame();
+
 
     wxFrame* m_frame;
 
@@ -399,6 +407,98 @@ TEST_CASE_METHOD(MenuTestCase, "Menu::Labels", "[menu]")
     CHECK( wxMenuItem::GetLabelText("&Foo\tCtrl-F") == "Foo" );
 }
 
+#ifdef __WXGTK4__
+
+namespace
+{
+
+// The popover the menu bar opens for its menu at the given position.
+GtkWidget* GetMenuBarPopover(wxMenuBar* bar, size_t pos)
+{
+    GtkWidget* item = gtk_widget_get_first_child(bar->GetHandle());
+    for ( size_t n = 0; item && n < pos; ++n )
+        item = gtk_widget_get_next_sibling(item);
+
+    for ( GtkWidget* child = item ? gtk_widget_get_first_child(item) : nullptr;
+          child;
+          child = gtk_widget_get_next_sibling(child) )
+    {
+        if ( GTK_IS_POPOVER(child) )
+            return child;
+    }
+
+    return nullptr;
+}
+
+} // anonymous namespace
+
+// Menus are updated when they are opened, as under GTK+ 3, and not on every
+// idle event: walking every item of every menu each time is what kept an idle
+// wxMaxima, whose menus have hundreds of items, at several percent of a core.
+TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIOnOpen", "[menu]")
+{
+    int updates = 0;
+    m_frame->Bind(wxEVT_UPDATE_UI, [&](wxUpdateUIEvent& event)
+    {
+        ++updates;
+        event.Enable(false);
+    }, MenuTestCase_Bar);
+
+    int opened = 0;
+    m_frame->Bind(wxEVT_MENU_OPEN, [&](wxMenuEvent& event)
+    {
+        if ( event.GetMenu() == m_menuWithBar )
+            ++opened;
+        event.Skip();
+    });
+
+    m_frame->UpdateWindowUI(wxUPDATE_UI_FROMIDLE);
+    CHECK( updates == 0 );
+    CHECK( m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+
+    wxMenuBar* const bar = m_frame->GetMenuBar();
+    GtkWidget* const popover =
+        GetMenuBarPopover(bar, bar->FindMenu(m_menuLabels[1]));
+    REQUIRE( popover );
+
+    gtk_widget_set_visible(popover, TRUE);
+    gtk_widget_set_visible(popover, FALSE);
+
+    CHECK( opened == 1 );
+    CHECK( updates > 0 );
+    CHECK( !m_menuWithBar->IsEnabled(MenuTestCase_Bar) );
+}
+
+// An accelerator activates an item without its menu being opened, so the item
+// has to be brought up to date first, or it acts on whatever state the menu
+// was last opened with.
+TEST_CASE_METHOD(MenuTestCase, "Menu::UpdateUIOnAccel", "[menu]")
+{
+    bool enable = false;
+    m_frame->Bind(wxEVT_UPDATE_UI, [&](wxUpdateUIEvent& event)
+    {
+        event.Enable(enable);
+    }, MenuTestCase_Bar);
+
+    int activated = 0;
+    m_frame->Bind(wxEVT_MENU, [&](wxCommandEvent&) { ++activated; },
+                  MenuTestCase_Bar);
+
+    wxMenuItem* const item = m_frame->GetMenuBar()->FindItem(MenuTestCase_Bar);
+    REQUIRE( item );
+
+    CHECK( !item->GTKActivate() );
+    CHECK( activated == 0 );
+
+    // The control: the same activation goes through once the handler allows
+    // it, so the refusal above was the update and not a broken activation.
+    enable = true;
+    CHECK( item->GTKActivate() );
+    CHECK( activated == 1 );
+}
+
+#endif // __WXGTK4__
+
 #if wxUSE_INTL
 
 static wxString
@@ -588,6 +688,13 @@ public:
         return m_event != nullptr;
     }
 
+    // Throw away whatever was received, so that the next check starts clean.
+    void Clear()
+    {
+        delete m_event;
+        m_event = nullptr;
+    }
+
 private:
     void OnMenu(wxCommandEvent& event)
     {
@@ -676,6 +783,49 @@ TEST_CASE_METHOD(MenuTestCase, "Menu::Events", "[menu]")
     wxYield();
 
     CHECK( !handler.GotEvent() );
+
+    handler.Clear();
+    text->Destroy();
+    wxYield();
+
+    // The other controls embedding an editable text field bind this key for
+    // themselves too, so the accelerator has to lose to each of them as well.
+    // They are checked one at a time, so a failure names the control rather
+    // than only the key.
+    struct EditableControl
+    {
+        const char* name;
+        wxWindow* win;
+    };
+
+    const EditableControl editable[] =
+    {
+#if wxUSE_COMBOBOX
+        { "wxComboBox", new wxComboBox(m_frame, wxID_ANY, "Testing") },
+#endif
+#if wxUSE_SEARCHCTRL
+        { "wxSearchCtrl", new wxSearchCtrl(m_frame, wxID_ANY, "Testing") },
+#endif
+#if wxUSE_SPINCTRL
+        { "wxSpinCtrl", new wxSpinCtrl(m_frame, wxID_ANY, "17") },
+#endif
+    };
+
+    for ( const EditableControl& c : editable )
+    {
+        c.win->SetFocus();
+        wxYield();
+
+        sim.Char('A', wxMOD_CONTROL);
+        wxYield();
+
+        INFO("Accelerator fired while " << c.name << " had the focus");
+        CHECK( !handler.GotEvent() );
+
+        handler.Clear();
+        c.win->Destroy();
+        wxYield();
+    }
 #endif // wxUSE_UIACTIONSIMULATOR
 }
 

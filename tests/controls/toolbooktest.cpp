@@ -22,6 +22,10 @@
 
 #include <memory>
 
+#ifdef __WXGTK4__
+    #include "wx/gtk/private/wrapgtk.h"
+#endif // __WXGTK4__
+
 class ToolbookTestCase : public BookCtrlBaseTestCase
 {
 public:
@@ -62,5 +66,38 @@ TEST_CASE_METHOD(ToolbookTestCase, "Toolbook::ToolBar", "[toolbook]")
     CHECK(toolbar);
     CHECK(toolbar->GetToolsCount() == 3);
 }
+
+#ifdef __WXGTK4__
+TEST_CASE_METHOD(ToolbookTestCase, "Toolbook::ToolPacking", "[toolbook]")
+{
+    wxToolBar* const toolbar =
+        static_cast<wxToolBar*>(m_toolbook->GetToolBar());
+    GtkBox* const box = GTK_BOX(toolbar->GTKGetToolbar());
+
+    CHECK( toolbar->GetToolPacking() == 0 );
+    CHECK( gtk_box_get_spacing(box) == 0 );
+
+    toolbar->SetToolPacking(7);
+    CHECK( toolbar->GetToolPacking() == 7 );
+    CHECK( gtk_box_get_spacing(box) == 7 );
+
+    toolbar->SetToolPacking(0);
+    CHECK( toolbar->GetToolPacking() == 0 );
+    CHECK( gtk_box_get_spacing(box) == 0 );
+
+    // Invalid negative values must not put the wx value and the native value
+    // out of sync. This also keeps the sample's Decrease command at zero.
+    toolbar->SetToolPacking(-1);
+    CHECK( toolbar->GetToolPacking() == 0 );
+    CHECK( gtk_box_get_spacing(box) == 0 );
+
+    wxToolBar toolbarCreatedLater;
+    toolbarCreatedLater.SetToolPacking(5);
+    CHECK( toolbarCreatedLater.Create(wxTheApp->GetTopWindow(), wxID_ANY) );
+    GtkBox* const later =
+        GTK_BOX(toolbarCreatedLater.GTKGetToolbar());
+    CHECK( gtk_box_get_spacing(later) == 5 );
+}
+#endif // __WXGTK4__
 
 #endif //wxUSE_TOOLBOOK
