@@ -13,7 +13,13 @@
 
 #include "wx/private/tlwdrag.h"
 
-#if defined(wxHAVE_WAYLAND_PROTOCOLS) && defined(wxHAVE_WAYLAND_TOPLEVEL_DRAG)
+// Not under GTK 4: the implementation below is built on GdkWindow,
+// gtk_drag_dest_*() and gdk_drag_status(), none of which exist there. The
+// !wxHAS_WAYLAND_TLW_DRAG branches further down report it as unsupported,
+// which is what the GTK 4 port does with it for now.
+#if defined(wxHAVE_WAYLAND_PROTOCOLS) && \
+        defined(wxHAVE_WAYLAND_TOPLEVEL_DRAG) && \
+        !defined(__WXGTK4__)
     #define wxHAS_WAYLAND_TLW_DRAG
 #endif
 
