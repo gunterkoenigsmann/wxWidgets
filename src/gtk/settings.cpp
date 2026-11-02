@@ -1501,7 +1501,9 @@ wxColour wxSystemSettingsNative::GetColour(wxSystemColour index)
         sc.AddButton().Border(color);
         break;
     case wxSYS_COLOUR_GRIDLINES:
-#if GTK_CHECK_VERSION(3,20,0)
+#if GTK_CHECK_VERSION(3,20,0) && !defined(__WXGTK4__)
+        // GTK 4 has no GtkTreeView header to ask, so it takes the button
+        // border below.
         if (gtk_check_version(3,20,0) == nullptr)
         {
             // Don't use GtkTreeView grid lines colour, which is either almost
