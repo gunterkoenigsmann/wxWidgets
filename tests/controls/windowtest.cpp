@@ -59,6 +59,7 @@
 #ifdef __WXGTK4__
     #include "wx/button.h"
     #include "wx/popupwin.h"
+    #include "wx/scrolbar.h"
     #include "wx/scrolwin.h"
     #include "wx/gtk/private/wrapgtk.h"
     #include "wx/gtk/private/win_gtk.h"
@@ -1784,3 +1785,72 @@ TEST_CASE("Window::AccessibleName", "[window][accessibility]")
 }
 
 #endif // __WXMSW__ && wxUSE_ACCESSIBILITY
+
+#if defined(__WXGTK4__) && wxUSE_SCROLLBAR
+
+// GTK 4 sends wxEVT_SCROLL_THUMBRELEASE from an idle callback queued when the
+// mouse button is let go, and the scrollbar may be gone by the time it runs.
+// The release is fed to wxScrollBar's own click gesture, as GTK would.
+TEST_CASE("wxScrollBar::DestroyedBeforeThumbRelease", "[scrollbar][gtk]")
+{
+    // Presses the thumb, drags it and lets go, which queues the idle
+    // callback, then returns without letting it run.
+    const auto dragAndRelease = [](wxScrollBar* sb)
+    {
+        GtkGesture* gesture = nullptr;
+        GListModel* const controllers =
+            gtk_widget_observe_controllers(sb->GetHandle());
+        for ( guint n = 0; n < g_list_model_get_n_items(controllers); n++ )
+        {
+            GObject* const c = G_OBJECT(g_list_model_get_item(controllers, n));
+            if ( GTK_IS_GESTURE_CLICK(c) &&
+                    gtk_event_controller_get_propagation_phase(
+                        GTK_EVENT_CONTROLLER(c)) == GTK_PHASE_CAPTURE )
+                gesture = GTK_GESTURE(c);
+            g_object_unref(c);
+        }
+        g_object_unref(controllers);
+        REQUIRE( gesture );
+
+        GtkAdjustment* const adj =
+            gtk_scrollbar_get_adjustment(GTK_SCROLLBAR(sb->GetHandle()));
+
+        g_signal_emit_by_name(gesture, "pressed", 1, 1.0, 1.0);
+        gtk_adjustment_set_value(adj, 50);
+        g_signal_emit_by_name(gesture, "released", 1, 1.0, 1.0);
+    };
+
+    wxWindow* const parent = wxTheApp->GetTopWindow();
+
+    // The control: left alone, the release does arrive. Without this the
+    // case below would pass for a release that was never queued at all.
+    {
+        std::unique_ptr<wxScrollBar>
+            sb(new wxScrollBar(parent, wxID_ANY));
+        sb->SetScrollbar(0, 10, 100, 10);
+
+        int releases = 0;
+        sb->Bind(wxEVT_SCROLL_THUMBRELEASE,
+                 [&releases](wxScrollEvent&) { releases++; });
+
+        dragAndRelease(sb.get());
+        CHECK( releases == 0 );
+        CHECK( WaitFor("thumb release",
+                       [&releases]() { return releases == 1; }) );
+    }
+
+    // Destroyed before the idle callback runs. Only valgrind or an address
+    // sanitizer sees the freed window being read; elsewhere this at least
+    // runs the callback against it.
+    {
+        wxScrollBar* const sb = new wxScrollBar(parent, wxID_ANY);
+        sb->SetScrollbar(0, 10, 100, 10);
+
+        dragAndRelease(sb);
+        delete sb;
+
+        YieldForAWhile();
+    }
+}
+
+#endif // __WXGTK4__ && wxUSE_SCROLLBAR
