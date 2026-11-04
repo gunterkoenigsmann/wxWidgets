@@ -553,7 +553,10 @@ TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterLayoutChange",
     CHECK( leftDowns == 0 );
 }
 
-#if wxUSE_SCROLLBAR
+// Not under MSW, where the press on the thumb starts the system's modal
+// scrollbar tracking loop inside the next wxYield(). Only the release ends
+// that loop, and this test sends it after the yield returns.
+#if wxUSE_SCROLLBAR && !defined(__WXMSW__)
 TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterScrollbarClick",
                  "[window][mouse]")
 {
@@ -638,7 +641,7 @@ TEST_CASE_METHOD(WindowTestCase, "Window::PressAfterScrollbarClick",
     CHECK( otherDowns == 1 );
     CHECK( otherUps == 1 );
 }
-#endif // wxUSE_SCROLLBAR
+#endif // wxUSE_SCROLLBAR && !__WXMSW__
 #endif // wxUSE_UIACTIONSIMULATOR
 
 #ifdef __WXGTK4__
