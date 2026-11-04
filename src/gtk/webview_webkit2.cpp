@@ -710,17 +710,18 @@ static wxString GetStandardWebExtensionsDir()
     return dir;
 }
 
-// Where our extension actually is, or empty if it was not found.
-//
-// The standard location first, then locations relative to the executable, so
-// that the tests and the sample can run before wxWebView is installed.
+// Look for the directory containing our web extension, return empty string if
+// it couldn't be found.
 static wxString FindWebExtensionsDir()
 {
-    if ( CheckDirectoryForWebExt(GetStandardWebExtensionsDir()) )
-        return GetStandardWebExtensionsDir();
+    // Try the location it is supposed to be normally installed in first.
+    const wxString& standardDir = GetStandardWebExtensionsDir();
+    if ( !standardDir.empty() && CheckDirectoryForWebExt(standardDir) )
+        return standardDir;
 
-    const wxString exepath =
-        wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
+    // These relative locations are used as fallbacks to allow running
+    // the tests and sample using wxWebView before installing it.
+    wxString exepath = wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath();
     if ( !exepath.empty() )
     {
         wxString const directories[] =
@@ -740,6 +741,14 @@ static wxString FindWebExtensionsDir()
     return wxString();
 }
 
+// Return the directory containing the web extension, searching for it only
+// once, as the result can't change while the program is running.
+static const wxString& GetWebExtensionsDir()
+{
+    static const wxString s_dir = FindWebExtensionsDir();
+    return s_dir;
+}
+
 static void
 wxgtk_initialize_web_extensions(WebKitWebContext *context,
                                 GDBusServer *dbusServer)
@@ -747,10 +756,9 @@ wxgtk_initialize_web_extensions(WebKitWebContext *context,
     const char *address = g_dbus_server_get_client_address(dbusServer);
     wxGtkVariant user_data(g_variant_new("(s)", address));
 
-    const wxString dir = FindWebExtensionsDir();
+    const wxString& dir = GetWebExtensionsDir();
     if ( !dir.empty() )
-        webkit_web_context_set_web_extensions_directory(context,
-                                                        dir.utf8_str());
+        webkit_web_context_set_web_extensions_directory(context, dir.utf8_str());
 
     webkit_web_context_set_web_extensions_initialization_user_data(context,
                                                                    user_data.Release());
@@ -807,6 +815,15 @@ wxgtk_authorize_authenticated_peer_cb(GDBusAuthObserver *,
                                       wxWebViewWebKit *)
 {
     return wxgtk_dbus_peer_is_authorized(credentials);
+}
+
+static gboolean
+wxgtk_extension_wait_timeout(void* data)
+{
+    *static_cast<bool*>(data) = true;
+
+    // return FALSE to remove this timeout
+    return FALSE;
 }
 
 } // extern "C"
@@ -1103,7 +1120,13 @@ wxWebViewWebKit::wxWebViewWebKit(WebKitWebView* parentWebView, wxWebViewWebKit* 
     m_web_view = (WebKitWebView*) webkit_web_view_new_with_related_view(parentWebView);
 #endif
     m_dbusServer = nullptr;
-    m_extension = nullptr;
+
+    // Related views share the web process of the parent view, so the web
+    // extension running in it is already connected to the parent and won't
+    // connect to us: just reuse the parent connection.
+    m_extension = parentWebViewCtrl->m_extension
+                    ? G_DBUS_PROXY(g_object_ref(parentWebViewCtrl->m_extension))
+                    : nullptr;
 
     wxReadyToShowParams* params = new wxReadyToShowParams();
     params->childWebView = this;
@@ -1128,8 +1151,6 @@ bool wxWebViewWebKit::Create(wxWindow *parent,
                       long style,
                       const wxString& name)
 {
-    m_dbusServer = nullptr;
-    m_extension = nullptr;
     m_busy = false;
     m_guard = false;
     FindClear();
@@ -1147,13 +1168,15 @@ bool wxWebViewWebKit::Create(wxWindow *parent,
         return false;
     }
 
-    SetupWebExtensionServer();
-    g_signal_connect(m_config.GetNativeConfiguration(),
-                     wxWEBKIT_INITIALIZE_WEB_EXTENSIONS,
-                     G_CALLBACK(wxgtk_initialize_web_extensions),
-                     m_dbusServer);
-
     if (!isChildWebView)
+    {
+        // Child web views reuse the extension connection of their parent.
+        SetupWebExtensionServer();
+        g_signal_connect(m_config.GetNativeConfiguration(),
+                         wxWEBKIT_INITIALIZE_WEB_EXTENSIONS,
+                         G_CALLBACK(wxgtk_initialize_web_extensions),
+                         m_dbusServer);
+
 #ifdef __WXGTK4__
         // The network session carrying the data path and proxy settings has
         // to be given to the view here: unlike under GTK3, it isn't reachable
@@ -1170,6 +1193,8 @@ bool wxWebViewWebKit::Create(wxWindow *parent,
 #else
         m_web_view = WEBKIT_WEB_VIEW(webkit_web_view_new());
 #endif
+    }
+
     GTKCreateScrolledWindowWith(GTK_WIDGET(m_web_view));
     g_object_ref(m_widget);
 
@@ -2491,11 +2516,47 @@ void wxWebViewWebKit::SetupWebExtensionServer()
 
 GDBusProxy *wxWebViewWebKit::GetExtensionProxy() const
 {
-    if (!m_extension)
+    if (m_extension)
+        return m_extension;
+
+    const wxString& dir = GetWebExtensionsDir();
+    if (dir.empty())
     {
         g_warning("Web extension not found in \"%s\", "
                   "some wxWebView functionality will be not available",
                   (const char*)GetStandardWebExtensionsDir().utf8_str());
+        return nullptr;
+    }
+
+    if (m_dbusServer && !m_alreadyWaitedForExtension)
+    {
+        // The extension connects to our D-Bus server asynchronously and this
+        // may not have happened yet if the web process has been launched only
+        // recently, so give it some time to do it.
+        m_alreadyWaitedForExtension = true;
+
+        // The timeout is chosen arbitrarily, but should be enough, knowing
+        // that typically the extension connects in ~120ms.
+        bool timedOut = false;
+        const guint timeoutId = g_timeout_add(2000,
+                                              wxgtk_extension_wait_timeout,
+                                              &timedOut);
+
+        GMainContext *main_context = g_main_context_get_thread_default();
+        while (!m_extension && !timedOut)
+        {
+            g_main_context_iteration(main_context, TRUE);
+        }
+
+        if (!timedOut)
+            g_source_remove(timeoutId);
+    }
+
+    if (!m_extension)
+    {
+        g_warning("Web extension loaded from \"%s\" is not connected, "
+                  "some wxWebView functionality will be not available",
+                  (const char*)dir.utf8_str());
     }
     return m_extension;
 }

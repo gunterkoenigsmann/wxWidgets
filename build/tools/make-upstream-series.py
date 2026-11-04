@@ -29,14 +29,16 @@ Two things decide the order.
     built. Putting it first would break the build at step one, which is how
     the first version of this script was found to be wrong.
 
-docs/ and CLAUDE.md are left out: they are this fork's working notes.
+docs/ and CLAUDE.md are left out: they are this fork's working notes. So is
+.claude/, which sets up this fork's cloud sessions.
 
 Usage:
     build/tools/make-upstream-series.py --dry   # what the groups would be
     build/tools/make-upstream-series.py         # create the branches
 
 Check afterwards that nothing was dropped:
-    git diff upstream-series/17-build <port branch> -- . ':!docs' ':!CLAUDE.md'
+    git diff upstream-series/17-build <port branch> -- . \
+        ':!docs' ':!CLAUDE.md' ':!.claude'
 
 and that every step still builds, which is what catches a file landing in a
 later group than the code calling it:
@@ -156,7 +158,7 @@ out = subprocess.run(["git","diff","--numstat",MB,TIP],capture_output=True,text=
 files = collections.defaultdict(list)
 for line in out.splitlines():
     a,d,p = line.split("\t")
-    if p.startswith("docs/") or p == "CLAUDE.md": continue
+    if p.startswith(("docs/", ".claude/")) or p == "CLAUDE.md": continue
     if p in FORK_ONLY_FILES: continue
     for name,_desc,fn in RULES:
         if fn(p):
