@@ -53,7 +53,8 @@
 //    gtk_accessible_set_accessible_parent(), even though
 //    gtk_accessible_get_first_accessible_child() right next to it does call
 //    its vfunc. So the chain has to exist before the walk starts, and the
-//    objects are made all at once the first time anything asks for them.
+//    objects are made all at once the first time anything asks for them
+//    (or soon after, see RequestChildren()).
 //    Verified on GTK 4.14.5 by docs/gtk/probes/gtk4-a11y-virtual-child.c.
 
 // ----------------------------------------------------------------------------
@@ -251,7 +252,7 @@ struct wxGtkAccChildClass
 
 // Defined below, once wxGTKAccessibleImpl is complete.
 static GtkWidget* wxGTKAccImplGetWidget(wxGTKAccessibleImpl* impl);
-static wxGtkAccChild* wxGTKAccImplGetChild(wxGTKAccessibleImpl* impl, int childId);
+static wxGtkAccChild* wxGTKAccImplFindChild(wxGTKAccessibleImpl* impl, int childId);
 static int wxGTKAccImplGetChildCount(wxGTKAccessibleImpl* impl);
 static bool wxGTKAccImplGetBounds(wxGTKAccessibleImpl* impl, int childId,
                                   wxRect& rect);
@@ -334,7 +335,7 @@ static GtkAccessible* wx_acc_child_get_next_accessible_sibling(GtkAccessible* ac
     if ( next > wxGTKAccImplGetChildCount(child->m_impl) )
         return nullptr;
 
-    wxGtkAccChild* const sibling = wxGTKAccImplGetChild(child->m_impl, next);
+    wxGtkAccChild* const sibling = wxGTKAccImplFindChild(child->m_impl, next);
 
     return sibling ? GTK_ACCESSIBLE(g_object_ref(sibling)) : nullptr;
 }
@@ -554,6 +555,60 @@ public:
         return count;
     }
 
+    // The object standing for childId if it has been made, without making it.
+    //
+    // This is what anything GTK calls must use. GTK asks for children while it
+    // is realizing the parent's AT context, and making one there means
+    // gtk_accessible_set_accessible_parent(), which realizes that same context
+    // again from inside its own realization: the AT-SPI backend then registers
+    // the object twice and writes past the end of its data, which surfaces
+    // much later as a heap corruption abort when the window is destroyed.
+    wxGtkAccChild* FindChild(int childId) const
+    {
+        if ( childId < 1 )
+            return nullptr;
+
+        const size_t index = size_t(childId - 1);
+        return index < m_children.size() ? m_children[index] : nullptr;
+    }
+
+    // Whether the sibling chain is there for the number of children the
+    // wxAccessible reports now.
+    bool HasChildren()
+    {
+        return m_builtChildCount > 0 && m_builtChildCount == GetChildCount();
+    }
+
+    // Build the chain for a GTK call asking for the first child: right away
+    // if that is safe, otherwise from the event loop.
+    //
+    // Making a child realizes the widget's AT context, which is harmless once
+    // it is realized and fatal while GTK is still realizing it -- see
+    // FindChild(). GTK marks a context realized only after its realization
+    // has finished, so "not realized yet" covers both "never asked" and "being
+    // realized right now", and only the first is safe; the event loop is
+    // where both are. Once the chain is built from there, GTK tells an
+    // assistive technology that the children changed, so the walk that found
+    // none sees them the next time.
+    //
+    // GTK's test backend (GTK_A11Y=test) never realizes anything by walking
+    // the tree, so there building right away is always safe -- and needed,
+    // since nothing there ever realizes a context that is merely asked about.
+    void RequestChildren()
+    {
+        if ( m_building || HasChildren() )
+            return;
+
+        if ( IsSafeToBuildNow() )
+        {
+            EnsureChildren();
+            return;
+        }
+
+        if ( !m_buildSource )
+            m_buildSource = g_idle_add(&wxGTKAccessibleImpl::BuildChildren, this);
+    }
+
     // Make, or find, the object standing for childId.
     wxGtkAccChild* GetChild(int childId)
     {
@@ -608,7 +663,8 @@ public:
     //
     // Nothing is built until an assistive technology first walks the tree, but
     // once it does, all of it is. That is GTK's requirement rather than a
-    // choice: see the note at the top of this file.
+    // choice: see the note at the top of this file. Called from the event
+    // loop, or once the widget's AT context is realized: see RequestChildren().
     void EnsureChildren()
     {
         const int count = GetChildCount();
@@ -618,6 +674,10 @@ public:
         GtkWidget* const widget = GetWidget();
         if ( !widget )
             return;
+
+        // Making the children makes GTK walk them, and the walk asks for the
+        // first child again before the chain is complete.
+        m_building = true;
 
         for ( int childId = count; childId >= 1; childId-- )
         {
@@ -633,6 +693,9 @@ public:
                 GTK_ACCESSIBLE(widget),
                 next ? GTK_ACCESSIBLE(next) : nullptr);
         }
+
+        m_building = false;
+        m_builtChildCount = count;
     }
 
     // Copy what the wxAccessible says about childId into GTK's cache.
@@ -779,6 +842,13 @@ public:
 
     void Detach()
     {
+        if ( m_buildSource )
+        {
+            g_source_remove(m_buildSource);
+            m_buildSource = 0;
+        }
+        m_builtChildCount = 0;
+
         for ( size_t n = 0; n < m_children.size(); n++ )
         {
             if ( wxGtkAccChild* const child = m_children[n] )
@@ -796,6 +866,44 @@ public:
     }
 
 private:
+    bool IsSafeToBuildNow()
+    {
+        GtkWidget* const widget = GetWidget();
+        if ( !widget )
+            return false;
+
+        GtkATContext* const context =
+            gtk_accessible_get_at_context(GTK_ACCESSIBLE(widget));
+        if ( !context )
+            return false;
+
+        gboolean realized = FALSE;
+        if ( g_object_class_find_property(G_OBJECT_GET_CLASS(context),
+                                          "realized") )
+            g_object_get(context, "realized", &realized, nullptr);
+
+        // Not public API, so known by name only.
+        const GType testType = g_type_from_name("GtkTestATContext");
+        const bool isTest = testType &&
+                            G_TYPE_CHECK_INSTANCE_TYPE(context, testType);
+
+        g_object_unref(context);
+
+        return realized || isTest;
+    }
+
+    static gboolean BuildChildren(gpointer data)
+    {
+        wxGTKAccessibleImpl* const self = static_cast<wxGTKAccessibleImpl*>(data);
+
+        // Cleared only afterwards: building the chain makes GTK ask for the
+        // children again, and that must not queue a second build.
+        self->EnsureChildren();
+        self->m_buildSource = 0;
+
+        return G_SOURCE_REMOVE;
+    }
+
     void ClearWidgetData()
     {
         if ( !m_widget )
@@ -812,6 +920,15 @@ private:
     wxAccessible* const m_acc;
     wxVector<wxGtkAccChild*> m_children;
 
+    // How many children EnsureChildren() last chained together, or 0.
+    int m_builtChildCount = 0;
+
+    // The idle source that will build the chain, or 0 if none is pending.
+    guint m_buildSource = 0;
+
+    // Whether EnsureChildren() is running.
+    bool m_building = false;
+
     // Weak: the widget can be destroyed while the wxAccessible is still alive.
     GtkWidget* m_widget = nullptr;
 
@@ -823,9 +940,9 @@ static GtkWidget* wxGTKAccImplGetWidget(wxGTKAccessibleImpl* impl)
     return impl->GetWidget();
 }
 
-static wxGtkAccChild* wxGTKAccImplGetChild(wxGTKAccessibleImpl* impl, int childId)
+static wxGtkAccChild* wxGTKAccImplFindChild(wxGTKAccessibleImpl* impl, int childId)
 {
-    return impl->GetChild(childId);
+    return impl->FindChild(childId);
 }
 
 static int wxGTKAccImplGetChildCount(wxGTKAccessibleImpl* impl)
@@ -860,9 +977,9 @@ GtkAccessible* wxGTKPizzaGetFirstAccessibleChild(GtkWidget* widget)
     if ( !impl || impl->GetChildCount() < 1 )
         return nullptr;
 
-    impl->EnsureChildren();
+    impl->RequestChildren();
 
-    wxGtkAccChild* const child = impl->GetChild(1);
+    wxGtkAccChild* const child = impl->FindChild(1);
 
     return child ? GTK_ACCESSIBLE(g_object_ref(child)) : nullptr;
 }
