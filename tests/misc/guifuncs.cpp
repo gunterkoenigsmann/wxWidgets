@@ -48,6 +48,7 @@
 #include "asserthelper.h"
 #include "waitfor.h"
 
+#include <functional>
 #include <memory>
 
 // gcc 16.x gives many bogus warnings about array subscripts being out of
@@ -104,18 +105,20 @@ TEST_CASE("GUI::TextDataObject", "[guifuncs][clipboard]")
 
 #ifdef __WXGTK4__
 
+#include "wx/scopeguard.h"
 #include "wx/stopwatch.h"
 #include "wx/gtk/private/wrapgtk.h"
 
 // A clipboard owner under the test's control: it either answers a read with
-// "hello" or never answers at all, as a hung application would. It also notes
-// whether the application's windows could be used while the read was waiting.
+// "hello" or never answers at all, as a hung application would. While the
+// read waits, it also runs gs_duringRead, standing in for the user.
 namespace
 {
 
 bool gs_providerStalls = false;
 GTask* gs_stalledWrite = nullptr;
 int gs_writesStarted = 0;
+std::function<void()> gs_duringRead;
 
 } // anonymous namespace
 
@@ -144,6 +147,8 @@ wx_test_provider_write_async(GdkContentProvider* provider,
                              gpointer data)
 {
     gs_writesStarted++;
+    if ( gs_duringRead )
+        gs_duringRead();
 
     GTask* const task = g_task_new(provider, cancellable, callback, data);
 
@@ -242,6 +247,67 @@ TEST_CASE("wxClipboard::ReadFromHungOwner", "[guifuncs][clipboard][gtk]")
         g_object_unref(gs_stalledWrite);
         gs_stalledWrite = nullptr;
     }
+
+    gdk_clipboard_set_content(clipboard, nullptr);
+    YieldForAWhile();
+}
+
+// The user may click or type while GetData() waits for the clipboard owner,
+// and the handlers must not run in the middle of it.
+TEST_CASE("wxClipboard::InputDuringRead", "[guifuncs][clipboard][gtk]")
+{
+    GdkClipboard* const clipboard =
+        gdk_display_get_clipboard(gdk_display_get_default());
+
+    // A bare handler rather than a control, so that nothing is left behind
+    // for later tests: the filter sees every event processed on this thread.
+    wxEvtHandler handler;
+
+    int clicks = 0,
+        keys = 0;
+    handler.Bind(wxEVT_BUTTON, [&clicks](wxCommandEvent&) { clicks++; });
+    handler.Bind(wxEVT_KEY_DOWN, [&keys](wxKeyEvent&) { keys++; });
+
+    const auto userActs = [&handler]()
+    {
+        wxCommandEvent click(wxEVT_BUTTON);
+        handler.ProcessEvent(click);
+
+        wxKeyEvent key(wxEVT_KEY_DOWN);
+        handler.ProcessEvent(key);
+    };
+
+    // The control: outside a read, the same events do reach the handlers.
+    userActs();
+    CHECK( clicks == 1 );
+    CHECK( keys == 1 );
+
+    gs_providerStalls = false;
+    gs_writesStarted = 0;
+    gs_duringRead = userActs;
+    wxON_BLOCK_EXIT_SET(gs_duringRead, std::function<void()>());
+
+    GdkContentProvider* const provider = GDK_CONTENT_PROVIDER(
+        g_object_new(wx_test_provider_get_type(), nullptr));
+    REQUIRE( gdk_clipboard_set_content(clipboard, provider) );
+    g_object_unref(provider);
+
+    {
+        wxClipboardLocker lockClip;
+        wxTextDataObject text;
+        CHECK( wxTheClipboard->GetData(text) );
+        CHECK( text.GetText() == "hello" );
+    }
+
+    // The read happened, and what was done during it went nowhere.
+    CHECK( gs_writesStarted == 1 );
+    CHECK( clicks == 1 );
+    CHECK( keys == 1 );
+
+    // And once it is over, input is handled again.
+    userActs();
+    CHECK( clicks == 2 );
+    CHECK( keys == 2 );
 
     gdk_clipboard_set_content(clipboard, nullptr);
     YieldForAWhile();
