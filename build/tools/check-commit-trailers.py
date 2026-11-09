@@ -21,9 +21,13 @@ the convention was settled is #174's problem, and failing on it here would
 make this check useless.
 
 Usage:
-    check-commit-trailers.py [<base>]
+    check-commit-trailers.py [<base> [<upstream>...]]
 
 <base> defaults to the upstream branch this one forked from.
+
+Commits reachable from any <upstream> are not checked: when wxWidgets master
+is merged in, its own commits arrive with it, and they follow upstream's
+attribution convention, not this fork's.
 """
 
 import re
@@ -55,13 +59,15 @@ def trailers(sha):
                           input=body, capture_output=True, text=True).stdout
 
 
-def commits(base):
-    out = run('git', 'rev-list', '%s..HEAD' % base)
+def commits(base, upstreams=()):
+    out = run('git', 'rev-list', 'HEAD', '^' + base,
+              *['^' + u for u in upstreams])
     return [c for c in out.split('\n') if c]
 
 
 def main():
     base = sys.argv[1] if len(sys.argv) > 1 else 'origin/master'
+    upstreams = sys.argv[2:]
 
     if not run('git', 'rev-parse', '--verify', base).strip():
         print('check-commit-trailers: no such base "%s", nothing to check' % base)
@@ -69,7 +75,7 @@ def main():
 
     problems = []
 
-    for sha in commits(base):
+    for sha in commits(base, upstreams):
         body = trailers(sha)
         subject = run('git', 'log', '-1', '--format=%s', sha).strip()
 
@@ -95,7 +101,7 @@ def main():
 
     if not problems:
         print('check-commit-trailers: %d commits, all consistent'
-              % len(commits(base)))
+              % len(commits(base, upstreams)))
         return 0
 
     print('check-commit-trailers: %d problem(s)\n' % len(problems))
