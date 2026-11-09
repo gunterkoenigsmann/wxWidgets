@@ -1395,7 +1395,8 @@ static void wxFillOtherKeyEventFields(wxKeyEvent& event,
 #else
     event.m_altDown = (keyData.state & GDK_MOD1_MASK) != 0;
 #endif
-    event.m_metaDown = (keyData.state & GDK_META_MASK) != 0;
+    event.m_metaDown =
+        (keyData.state & (GDK_META_MASK | GDK_SUPER_MASK)) != 0;
 
     // At least with current Linux systems, MOD5 corresponds to AltGr key and
     // we represent it, for consistency with Windows, which really allows to
@@ -5038,7 +5039,7 @@ wxMouseState wxGetMouseState()
 #else
     ms.SetAltDown((mask & GDK_MOD1_MASK) != 0);
 #endif
-    ms.SetMetaDown((mask & GDK_META_MASK) != 0);
+    ms.SetMetaDown((mask & (GDK_META_MASK | GDK_SUPER_MASK)) != 0);
 
     return ms;
 }

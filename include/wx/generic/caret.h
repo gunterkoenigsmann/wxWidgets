@@ -68,6 +68,7 @@ protected:
     virtual void DoHide() override;
     virtual void DoMove() override;
     virtual void DoSize() override;
+    virtual void DoGetPosition(int* x, int* y) const override;
 
     // blink the caret once
     void Blink();
@@ -81,6 +82,9 @@ protected:
 private:
     // GTK specific initialization
     void InitGeneric();
+
+    // Convert the current position to client coordinates.
+    wxPoint LogicalToClient() const;
 
     // the overlay for displaying the caret
     wxOverlay   m_overlay;
