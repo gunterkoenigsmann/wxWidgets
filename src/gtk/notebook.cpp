@@ -22,6 +22,7 @@
 
 #include "wx/imaglist.h"
 #include "wx/fontutil.h"
+#include "wx/weakref.h"
 
 #include "wx/gtk/private.h"
 #include "wx/gtk/private/gtk3-compat.h"
@@ -108,12 +109,22 @@ static void event_after(GtkNotebook* widget, GtkWidget*, guint, wxNotebook* win)
 {
     g_signal_handlers_block_by_func(widget, (void*)event_after, win);
 
-    g_idle_add(event_after_idle, win);
+    // The notebook may be destroyed before the idle callback runs, typically
+    // by the handler that vetoed the change, so it gets a weak reference.
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, event_after_idle,
+                    new wxWeakRef<wxNotebook>(win),
+                    [](gpointer data)
+                    {
+                        delete static_cast<wxWeakRef<wxNotebook>*>(data);
+                    });
 }
 
 static gboolean event_after_idle(void* data)
 {
-    wxNotebook* const win = static_cast<wxNotebook*>(data);
+    wxNotebook* const win = *static_cast<wxWeakRef<wxNotebook>*>(data);
+    if ( !win || win->IsBeingDeleted() )
+        return G_SOURCE_REMOVE;
+
     GtkNotebook* const widget = GTK_NOTEBOOK(win->m_widget);
 
     g_signal_handlers_block_by_func(widget, (void*)switch_page, win);
