@@ -37,6 +37,12 @@ public:
     // interchangeable in that case: SetId(NativeFormat) interns whatever it is
     // given, so passing an ordinary literal works.
     wxDataFormat( const char *id ) { InitFromString(id); }
+#elif defined(wxALLOW_UTF8_LITERALS)
+    template <size_t N>
+    wxDataFormat( const char (&id)[N] )
+        { InitFromString(wxString::FromUTF8Unchecked(id)); }
+    template <size_t N>
+    wxDataFormat( char (&id)[N] ) = delete;
 #endif
     wxDataFormat( const wchar_t *id ) { InitFromString(id); }
     wxDataFormat( const wxCStrData& id ) { InitFromString(id); }
