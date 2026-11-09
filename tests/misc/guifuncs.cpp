@@ -102,6 +102,153 @@ TEST_CASE("GUI::TextDataObject", "[guifuncs][clipboard]")
     CHECK( dobj2.GetText() == text );
 }
 
+#ifdef __WXGTK4__
+
+#include "wx/stopwatch.h"
+#include "wx/gtk/private/wrapgtk.h"
+
+// A clipboard owner under the test's control: it either answers a read with
+// "hello" or never answers at all, as a hung application would. It also notes
+// whether the application's windows could be used while the read was waiting.
+namespace
+{
+
+bool gs_providerStalls = false;
+GTask* gs_stalledWrite = nullptr;
+int gs_writesStarted = 0;
+
+} // anonymous namespace
+
+extern "C" {
+
+typedef struct { GdkContentProvider parent; } WxTestProvider;
+typedef struct { GdkContentProviderClass parent_class; } WxTestProviderClass;
+
+}
+
+G_DEFINE_TYPE(WxTestProvider, wx_test_provider, GDK_TYPE_CONTENT_PROVIDER)
+
+static GdkContentFormats* wx_test_provider_ref_formats(GdkContentProvider*)
+{
+    static const char* mimes[] = { "text/plain;charset=utf-8" };
+    return gdk_content_formats_new(mimes, 1);
+}
+
+static void
+wx_test_provider_write_async(GdkContentProvider* provider,
+                             const char*,
+                             GOutputStream* stream,
+                             int,
+                             GCancellable* cancellable,
+                             GAsyncReadyCallback callback,
+                             gpointer data)
+{
+    gs_writesStarted++;
+
+    GTask* const task = g_task_new(provider, cancellable, callback, data);
+
+    if ( gs_providerStalls )
+    {
+        gs_stalledWrite = task;
+        return;
+    }
+
+    // Asynchronously, as the reader runs on this same thread, and closing
+    // the stream at the end, as the reader waits for end of stream.
+    GInputStream* const source =
+        g_memory_input_stream_new_from_data("hello", 5, nullptr);
+    g_output_stream_splice_async(
+        stream, source, G_OUTPUT_STREAM_SPLICE_CLOSE_TARGET,
+        G_PRIORITY_DEFAULT, cancellable,
+        [](GObject* out, GAsyncResult* res, gpointer data)
+        {
+            GTask* const task = static_cast<GTask*>(data);
+            g_task_return_boolean(task,
+                g_output_stream_splice_finish(G_OUTPUT_STREAM(out), res,
+                                              nullptr) == 5);
+            g_object_unref(task);
+        },
+        task);
+    g_object_unref(source);
+}
+
+static gboolean
+wx_test_provider_write_finish(GdkContentProvider*,
+                              GAsyncResult* result,
+                              GError** error)
+{
+    return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+static void wx_test_provider_class_init(WxTestProviderClass* klass)
+{
+    GdkContentProviderClass* const c = GDK_CONTENT_PROVIDER_CLASS(klass);
+    c->ref_formats = wx_test_provider_ref_formats;
+    c->write_mime_type_async = wx_test_provider_write_async;
+    c->write_mime_type_finish = wx_test_provider_write_finish;
+}
+
+static void wx_test_provider_init(WxTestProvider*)
+{
+}
+
+// Another application owning the clipboard may be slow or hung, and while
+// GetData() waits for it nothing else can run normally. It must give up after
+// a while.
+TEST_CASE("wxClipboard::ReadFromHungOwner", "[guifuncs][clipboard][gtk]")
+{
+    GdkClipboard* const clipboard =
+        gdk_display_get_clipboard(gdk_display_get_default());
+
+    const auto offer = [clipboard](bool stalls)
+    {
+        gs_providerStalls = stalls;
+        gs_writesStarted = 0;
+
+        GdkContentProvider* const provider = GDK_CONTENT_PROVIDER(
+            g_object_new(wx_test_provider_get_type(), nullptr));
+        REQUIRE( gdk_clipboard_set_content(clipboard, provider) );
+        g_object_unref(provider);
+    };
+
+    wxClipboardLocker lockClip;
+
+    // The control: an owner that answers is read, so the provider really is
+    // what GetData() reads from below.
+    offer(false);
+    {
+        wxTextDataObject text;
+        CHECK( wxTheClipboard->GetData(text) );
+        CHECK( text.GetText() == "hello" );
+        CHECK( gs_writesStarted == 1 );
+    }
+
+    offer(true);
+    {
+        wxTextDataObject text;
+        wxStopWatch sw;
+        CHECK_FALSE( wxTheClipboard->GetData(text) );
+        const long elapsed = sw.Time();
+
+        CHECK( gs_writesStarted == 1 );
+        CHECK( elapsed >= 4000 );
+        CHECK( elapsed < 15000 );
+    }
+
+    if ( gs_stalledWrite )
+    {
+        g_task_return_new_error(gs_stalledWrite, G_IO_ERROR,
+                                G_IO_ERROR_CANCELLED, "test is over");
+        g_object_unref(gs_stalledWrite);
+        gs_stalledWrite = nullptr;
+    }
+
+    gdk_clipboard_set_content(clipboard, nullptr);
+    YieldForAWhile();
+}
+
+#endif // __WXGTK4__
+
 TEST_CASE("GUI::URLDataObject", "[guifuncs][clipboard]")
 {
     // this tests for buffer overflow, see #11102
