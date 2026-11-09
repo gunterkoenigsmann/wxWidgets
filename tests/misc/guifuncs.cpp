@@ -259,23 +259,22 @@ TEST_CASE("wxClipboard::InputDuringRead", "[guifuncs][clipboard][gtk]")
     GdkClipboard* const clipboard =
         gdk_display_get_clipboard(gdk_display_get_default());
 
-    std::unique_ptr<wxButton>
-        button(new wxButton(wxTheApp->GetTopWindow(), wxID_ANY, "Button"));
+    // A bare handler rather than a control, so that nothing is left behind
+    // for later tests: the filter sees every event processed on this thread.
+    wxEvtHandler handler;
 
     int clicks = 0,
         keys = 0;
-    button->Bind(wxEVT_BUTTON, [&clicks](wxCommandEvent&) { clicks++; });
-    button->Bind(wxEVT_KEY_DOWN, [&keys](wxKeyEvent&) { keys++; });
+    handler.Bind(wxEVT_BUTTON, [&clicks](wxCommandEvent&) { clicks++; });
+    handler.Bind(wxEVT_KEY_DOWN, [&keys](wxKeyEvent&) { keys++; });
 
-    const auto userActs = [&button]()
+    const auto userActs = [&handler]()
     {
-        wxCommandEvent click(wxEVT_BUTTON, button->GetId());
-        click.SetEventObject(button.get());
-        button->ProcessWindowEvent(click);
+        wxCommandEvent click(wxEVT_BUTTON);
+        handler.ProcessEvent(click);
 
         wxKeyEvent key(wxEVT_KEY_DOWN);
-        key.SetEventObject(button.get());
-        button->ProcessWindowEvent(key);
+        handler.ProcessEvent(key);
     };
 
     // The control: outside a read, the same events do reach the handlers.
