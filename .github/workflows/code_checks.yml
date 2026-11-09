@@ -112,7 +112,13 @@ jobs:
               echo "not a pull request, nothing to compare against"
               exit 0
             fi
-            python3 build/tools/check-commit-trailers.py "$base"
+            # Upstream's own commits come in with every merge of its master
+            # and are not this fork's to check.
+            git fetch --no-tags --quiet \
+                https://github.com/wxWidgets/wxWidgets.git \
+                +master:refs/remotes/upstream/master
+            python3 build/tools/check-commit-trailers.py "$base" \
+                upstream/master
   # End fork only.
 
   check-mixed-eol:
