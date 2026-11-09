@@ -101,6 +101,10 @@ private:
     guint m_watcherWatchId = 0;
     bool m_registered = false;
 
+    // Cancels the registration calls still waiting for their reply when the
+    // item goes away, as their callback would otherwise reach a freed item.
+    GCancellable* m_cancellable = nullptr;
+
     wxDECLARE_NO_COPY_CLASS(wxStatusNotifierItem);
 };
 

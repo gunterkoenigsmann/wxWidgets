@@ -284,6 +284,9 @@ void wxStatusNotifierItem::EmitSignal(const char* name)
 
 bool wxStatusNotifierItem::RegisterWithWatcher()
 {
+    if ( !m_cancellable )
+        m_cancellable = g_cancellable_new();
+
     // Asynchronously, and not only to keep startup quick. A panel adopts an
     // item and then reads its properties back; if we were blocked in a
     // synchronous call waiting for the reply to this one, we could not answer
@@ -297,12 +300,18 @@ bool wxStatusNotifierItem::RegisterWithWatcher()
         nullptr,
         G_DBUS_CALL_FLAGS_NONE,
         -1,
-        nullptr,
+        m_cancellable,
         [](GObject* source, GAsyncResult* result, gpointer data)
         {
             wxGtkError error;
             GVariant* const res = g_dbus_connection_call_finish(
                 G_DBUS_CONNECTION(source), result, error.Out());
+
+            // Hide() cancelled the call, and may have been called from the
+            // destructor: the item must not be touched.
+            if ( !res &&
+                    g_error_matches(error, G_IO_ERROR, G_IO_ERROR_CANCELLED) )
+                return;
 
             wxStatusNotifierItem* const self =
                 static_cast<wxStatusNotifierItem*>(data);
@@ -398,6 +407,13 @@ bool wxStatusNotifierItem::Show()
 
 void wxStatusNotifierItem::Hide()
 {
+    if ( m_cancellable )
+    {
+        g_cancellable_cancel(m_cancellable);
+        g_object_unref(m_cancellable);
+        m_cancellable = nullptr;
+    }
+
     if ( m_watcherWatchId )
     {
         g_bus_unwatch_name(m_watcherWatchId);

@@ -147,6 +147,9 @@ struct wxDBusMenuVTable
     {
         wxDBusMenu* const self = static_cast<wxDBusMenu*>(userData);
 
+        // The menu may have changed since the panel last read it.
+        const bool layoutChanged = self->Refresh();
+
         if ( strcmp(method, "GetLayout") == 0 )
         {
             gint32 parentId = 0;
@@ -225,8 +228,11 @@ struct wxDBusMenuVTable
                 return;
             }
 
+            // "v" takes a reference of its own, and the one lookup returned
+            // is ours to drop.
             g_dbus_method_invocation_return_value(
                 invocation, g_variant_new("(v)", value));
+            g_variant_unref(value);
             return;
         }
 
@@ -241,13 +247,15 @@ struct wxDBusMenuVTable
             if ( data )
                 g_variant_unref(data);
 
-            wxLogTrace(TRACE_DBUSMENU, "event %s on %d", eventId, id);
-
-            if ( strcmp(eventId, "clicked") == 0 )
+            // An id the panel got from a layout that has changed since names
+            // whatever is at that position now, which need not be the item
+            // that was clicked. The panel reads the new layout instead.
+            if ( !layoutChanged && !self->HandleEvent(id, eventId) )
             {
-                wxMenuItem* const item = self->FindItem(id);
-                if ( item && self->m_handler )
-                    self->m_handler->OnMenuItem(item);
+                g_dbus_method_invocation_return_error(
+                    invocation, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                    "No such menu item %d", id);
+                return;
             }
 
             g_dbus_method_invocation_return_value(invocation, nullptr);
@@ -256,11 +264,28 @@ struct wxDBusMenuVTable
 
         if ( strcmp(method, "EventGroup") == 0 )
         {
-            // Every event in the group is accepted, so no ids are reported
-            // back as unknown. Panels send these in bursts and a per-event
-            // reply is not worth the round trips.
             GVariantBuilder errors;
             g_variant_builder_init(&errors, G_VARIANT_TYPE("ai"));
+
+            GVariantIter* events = nullptr;
+            g_variant_get(params, "(a(isvu))", &events);
+
+            gint32 id;
+            const gchar* eventId;
+            GVariant* data;
+            guint32 timestamp;
+            while ( events && g_variant_iter_next(events, "(i&svu)",
+                                                  &id, &eventId, &data,
+                                                  &timestamp) )
+            {
+                g_variant_unref(data);
+
+                if ( layoutChanged || !self->HandleEvent(id, eventId) )
+                    g_variant_builder_add(&errors, "i", id);
+            }
+
+            if ( events )
+                g_variant_iter_free(events);
 
             g_dbus_method_invocation_return_value(
                 invocation, g_variant_new("(ai)", &errors));
@@ -368,21 +393,29 @@ wxDBusMenu::~wxDBusMenu()
 void wxDBusMenu::SetMenu(wxMenu* menu)
 {
     m_menu = menu;
-    Rebuild();
+
+    // Even if the walk comes out the same, the menu may have been rebuilt
+    // with new items at the old addresses, so the panel reads it again.
+    if ( !Refresh() )
+        NotifyLayoutChanged();
+}
+
+void wxDBusMenu::NotifyLayoutChanged()
+{
+    m_revision++;
 
     if ( !m_objectId )
         return;
 
     // Parent -1 rather than 0: the specification's way of saying the whole
-    // layout changed and none of it should be trusted, which is the case
-    // whenever the menu is replaced.
-    m_revision++;
+    // layout changed and none of it should be trusted.
     g_dbus_connection_emit_signal(
         m_connection, nullptr, m_path.utf8_str(), MENU_IFACE,
         "LayoutUpdated", g_variant_new("(ui)", m_revision, -1), nullptr);
 }
 
-void wxDBusMenu::AppendItems(wxMenu* menu)
+/* static */
+void wxDBusMenu::AppendItems(wxMenu* menu, wxVector<wxMenuItem*>& items)
 {
     if ( !menu )
         return;
@@ -393,22 +426,43 @@ void wxDBusMenu::AppendItems(wxMenu* menu)
           node = node->GetNext() )
     {
         wxMenuItem* const item = node->GetData();
-        m_items.push_back(item);
+        items.push_back(item);
 
         if ( item->IsSubMenu() )
-            AppendItems(item->GetSubMenu());
+            AppendItems(item->GetSubMenu(), items);
     }
 }
 
-void wxDBusMenu::Rebuild()
+bool wxDBusMenu::Refresh()
 {
-    m_items.clear();
-
     // Entry 0 is the root, which is not a wxMenuItem, so it holds nothing and
     // ids start at 1.
-    m_items.push_back(nullptr);
+    wxVector<wxMenuItem*> items;
+    items.push_back(nullptr);
 
-    AppendItems(m_menu);
+    AppendItems(m_menu, items);
+
+    if ( items == m_items )
+        return false;
+
+    m_items.swap(items);
+    NotifyLayoutChanged();
+
+    return true;
+}
+
+bool wxDBusMenu::HandleEvent(gint32 id, const char* eventId)
+{
+    wxLogTrace(TRACE_DBUSMENU, "event %s on %d", eventId, id);
+
+    wxMenuItem* const item = FindItem(id);
+    if ( !item )
+        return false;
+
+    if ( strcmp(eventId, "clicked") == 0 && m_handler )
+        m_handler->OnMenuItem(item);
+
+    return true;
 }
 
 wxMenuItem* wxDBusMenu::FindItem(gint32 id) const
@@ -434,7 +488,8 @@ GVariant* wxDBusMenu::BuildProperties(wxMenuItem* item) const
     g_variant_builder_add(
         &props, "{sv}", "label",
         g_variant_new_string(
-            ToDBusMenuLabel(item->GetItemLabel()).utf8_str()));
+            ToDBusMenuLabel(item->GetItemLabel().BeforeFirst('\t'))
+                .utf8_str()));
 
     g_variant_builder_add(&props, "{sv}", "enabled",
                           g_variant_new_boolean(item->IsEnabled()));

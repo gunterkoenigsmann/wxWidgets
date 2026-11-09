@@ -13,13 +13,12 @@
 
 #if wxUSE_TASKBARICON && defined(__WXGTK4__)
 
+#include "wx/menu.h"
 #include "wx/string.h"
 #include "wx/vector.h"
+#include "wx/weakref.h"
 
 #include <gio/gio.h>
-
-class wxMenu;
-class wxMenuItem;
 
 // A menu as the panel wants it: not a widget handed over, but a tree it can
 // ask about over the bus and act on from its own process.
@@ -49,21 +48,27 @@ public:
 
     const wxString& GetPath() const { return m_path; }
 
-    // The menu to serve, which the caller goes on owning. Passing a different
-    // one -- or the same one after its contents changed -- tells the panel to
-    // read the layout again.
+    // The menu to serve, which the caller goes on owning. It may change or be
+    // destroyed while it is served: the panel asks about it from another
+    // process at any time, so every request reads the menu as it is then.
     void SetMenu(wxMenu* menu);
 
 private:
     friend struct wxDBusMenuVTable;
 
-    // Ids are positions in a flattened walk of the menu, with 0 for the root,
-    // rebuilt whenever the layout changes. A panel may ask about an id from
-    // before a rebuild, so a lookup that fails is ordinary rather than an
-    // error.
-    void Rebuild();
+    // Ids are positions in a flattened walk of the menu, with 0 for the root.
+    // Refresh() walks it again and, if anything moved, tells the panel and
+    // returns true: ids it sent before then may name a different item now.
+    // It is called before every request is answered, so FindItem() only ever
+    // returns items that are in the menu at that moment.
+    bool Refresh();
+    void NotifyLayoutChanged();
     wxMenuItem* FindItem(gint32 id) const;
-    void AppendItems(wxMenu* menu);
+    static void AppendItems(wxMenu* menu, wxVector<wxMenuItem*>& items);
+
+    // Handles one "clicked" or other event, as Event and EventGroup carry it.
+    // Returns false if the id is unknown.
+    bool HandleEvent(gint32 id, const char* eventId);
 
     GVariant* BuildProperties(wxMenuItem* item) const;
     GVariant* BuildLayout(gint32 id, gint32 depth) const;
@@ -74,9 +79,13 @@ private:
     GDBusConnection* m_connection = nullptr;
     guint m_objectId = 0;
 
-    wxMenu* m_menu = nullptr;
+    // Weak, as the application may delete the menu while it is served, e.g.
+    // one on the stack given to wxTaskBarIcon::PopupMenu().
+    wxWeakRef<wxMenu> m_menu;
 
-    // Index is the id; entry 0 is unused, standing for the root.
+    // Index is the id; entry 0 is unused, standing for the root. Only ever
+    // compared, never dereferenced, before Refresh() has rebuilt it from the
+    // live menu.
     wxVector<wxMenuItem*> m_items;
 
     guint32 m_revision = 1;
